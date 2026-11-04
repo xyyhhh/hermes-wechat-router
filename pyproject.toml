@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-wechat-router"
+version = "0.1.0"
+description = "A Hermes gateway plugin for Jev-powered WeChat message triage"
+requires-python = ">=3.11"
+dependencies = ["aiohttp>=3.10,<4"]
+readme = "README.md"
+license = "MIT"
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2", "PyYAML>=6,<7"]
+
+[tool.setuptools.packages.find]
+include = ["wechat_router*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -1,0 +1,13 @@
+{
+  "source": "wechat-listener",
+  "event_id": "demo-message-001",
+  "conversation_id": "demo-group",
+  "chat_type": "group",
+  "conversation_name": "示例项目群",
+  "sender_id": "demo-colleague",
+  "sender_name": "同事",
+  "occurred_at": "2026-11-04T16:00:00+08:00",
+  "text": "@我 周五下午三点开项目会，可以吗？",
+  "mentions": ["YOUR_WECHAT_ID"],
+  "is_self": false
+}

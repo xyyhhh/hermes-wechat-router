@@ -1,0 +1,27 @@
+# Merge into the gateway owner's config.yaml. Do not replace the whole file.
+plugins:
+  enabled:
+    - wechat-router
+
+platforms:
+  wechat_router:
+    enabled: true
+    extra:
+      host: 127.0.0.1
+      port: 8768
+      mode: observe # observe calls Jev, but creates no Kanban tasks; change to active when ready
+      owner_name: 我
+      owner_ids: [YOUR_WECHAT_ID]
+      sources: [wechat-listener]
+      timezone: Asia/Shanghai
+      quiet_seconds: 8
+      max_wait_seconds: 60
+      model: jev-latest
+      board: default
+      triage_profile: inbox
+      routes:
+        schedule: calendar
+        deadline: assistant
+        todo: assistant
+        important: assistant
+        other: inbox
