@@ -57,9 +57,43 @@ def main():
             manifest = PluginManifest(name="wechat-router", kind="platform", source="user", path=str(plugin))
             register(PluginContext(manifest, manager))
             try:
+                verify_dashboard(plugin, home)
                 asyncio.run(exercise(home, wrapper))
             finally:
                 manager.unload()
+
+
+def verify_dashboard(plugin, home):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from hermes_cli.config import load_config, save_config
+    from hermes_cli.web_server_dashboard import _discover_dashboard_plugins, _mount_one_plugin_api
+    from wechat_router.config import data_path
+
+    save_config({"plugins": {"enabled": ["wechat-router"], "isolation": "in_process"},
+                 "model": {"default": "fixture-preserve-model"},
+                 "platforms": {"wechat_router": {"enabled": True, "extra": {"retry_seconds": 20}}}})
+    entry = next(p for p in _discover_dashboard_plugins([(plugin.parent, "user")]) if p["name"] == "wechat-router")
+    assert entry["tab"]["path"] == "/wechat-router" and not entry["tab"].get("hidden")
+    for key in ("entry", "css", "_api_file"):
+        assert (Path(entry["_dir"]) / entry[key]).is_file()
+    app = FastAPI()
+    assert _mount_one_plugin_api(app, entry, {"wechat-router"}, set())
+    with TestClient(app) as client:
+        prefix = "/api/plugins/wechat-router"
+        response = client.get(prefix + "/config")
+        assert response.status_code == 200, response.text
+        assert response.json()["settings"]["mode"] == "observe"
+        assert "synthetic-fixture-key" not in response.text
+        assert client.get(prefix + "/status").json() == {"initialized": False}
+        assert not data_path(home).exists()
+        response = client.put(prefix + "/config", json={"enabled": True, "settings": {"owner_name": "fixture-owner"}})
+        assert response.status_code == 200, response.text
+        saved = load_config()
+        assert saved["model"]["default"] == "fixture-preserve-model"
+        assert saved["platforms"]["wechat_router"]["extra"]["retry_seconds"] == 20
+        assert saved["platforms"]["wechat_router"]["extra"]["owner_name"] == "fixture-owner"
+    print("Dashboard discovery, real API mount and profile-scoped config persistence: passed")
 
 
 async def exercise(home, wrapper):

@@ -1,0 +1,6 @@
+{
+  "name": "hermes-wechat-router-dashboard-tests",
+  "private": true,
+  "scripts": {"test": "node --test tests/dashboard.test.cjs"},
+  "devDependencies": {"jsdom": "^26.1.0", "react": "^19.2.0", "react-dom": "^19.2.0"}
+}

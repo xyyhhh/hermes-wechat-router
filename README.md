@@ -45,7 +45,33 @@ hermes plugins install xyyhhh/hermes-wechat-router --enable
 | `WECHAT_ROUTER_SECRET` | 与外部监听器共享的 HMAC 密钥，至少 32 字节 |
 | `TYPESAFE_API_KEY` | TypeSafe Jev API key |
 
-使用 Hermes 自带的安装提示或配置界面录入密钥。插件通过 Hermes 的 profile secret 接口读取，不自行解析 `.env` 或其他凭据文件。
+使用 Hermes 自带的安装提示或下述 Dashboard 页面录入密钥。插件通过 Hermes 的 profile secret 接口读取，不自行解析 `.env` 或其他凭据文件。
+
+## Dashboard 配置页面（0.2.0 起）
+
+浏览器中的 Hermes Dashboard 侧边栏增加 **微信消息分流**，页面路径为 `/wechat-router`。使用 Hermes 官方 Dashboard 扩展接口，无需修改 Hermes 源码或运行前端构建。此页面面向 `hermes dashboard` 网页界面。
+
+已安装旧版时，更新插件：
+
+```sh
+hermes plugins update wechat-router
+```
+
+更新后重启 Dashboard 服务，再刷新浏览器。若 Dashboard 由 Gateway 托管，重启该 Gateway；独立运行的 `hermes dashboard` 需单独重启。请使用安装并启用了插件的同一 profile。若仍无入口，在 Hermes 的插件管理页确认 `wechat-router` 已启用，并确认当前 Hermes 版本支持 Dashboard 插件。
+
+页面支持：
+
+- 启用平台、观察/执行模式、本人 ID、关注事项、来源筛选和时区。
+- Jev 模型、消息合并窗口、每批上限、上下文上限和置信度阈值。
+- Kanban 看板、各分类的目标 profile 和复核 profile。
+- 监听地址/端口，以及单独保存两个凭据。已有密钥只显示是否配置，不回显。
+- 消息数量、插件内部 Jev 调用/token 统计、暂停/恢复、失败批次重试。
+
+**保存配置或凭据后，重启当前 profile 的 Gateway 生效。** 页面不会自动重启服务；暂停/恢复立即写入收件箱，进行中的批次可能继续完成。重试可能产生新的 Jev 调用。页面展示的处理开关不是 Gateway 在线探测，token 数据不包含下游 agent。
+
+配置 API 使用 Dashboard 的认证与 profile 隔离；消息监听器仍使用原来的 HMAC 接入端口，两者独立。只打开页面、刷新统计或保存配置均不会调用模型。页面未覆盖的高级参数继续在 YAML 中维护，保存页面配置会保留这些参数。
+
+### YAML 配置
 
 将 [examples/config.yaml](examples/config.yaml) 合并进该 profile 的配置，保留原有其他配置。关键字段：
 
@@ -187,10 +213,12 @@ hermes wechat-router retry <batch_id>
 python3 -m venv .venv
 .venv/bin/pip install -e '.[test]'
 .venv/bin/python -m pytest -q
+npm ci
+npm test
 .venv/bin/python scripts/verify_hermes.py --hermes-source <official-hermes-checkout>
 ```
 
-单元/HTTP 测试使用合成消息与本机 Jev fixture。端到端脚本通过真实 Hermes Plugin Doctor、平台适配器启停和真实 Kanban CLI/数据库验证整条链路，但不调用真实 Jev、不访问真实微信，也不启动下游 Agent。这验证协议和恢复行为，不能替代实际消息上的分类质量评估。
+单元/HTTP 测试使用合成消息与本机 Jev fixture。前端测试通过 React 和 jsdom 验证页面渲染、配置/凭据保存、暂停/恢复和重试；npm 依赖只用于开发测试。端到端脚本通过真实 Hermes Plugin Doctor、Dashboard 页面发现/后端加载/配置持久化、平台适配器启停和真实 Kanban CLI/数据库验证整条链路，但不调用真实 Jev、不访问真实微信，也不启动下游 Agent。这验证协议和恢复行为，不能替代实际消息上的分类质量评估。
 
 参考：[Hermes 插件开发](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins)、[平台适配器](https://hermes-agent.nousresearch.com/docs/developer-guide/adding-platform-adapters)、[Kanban](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban)、[TypeSafe API](https://docs.typesafe.ai/api/system-one)、[Choice](https://docs.typesafe.ai/primitives/choice)。
 

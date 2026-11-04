@@ -4,6 +4,9 @@ __pycache__/
 .venv/
 *.egg-info/
 dist/
+!dashboard/dist/
+!dashboard/dist/*
+node_modules/
 build/
 .env
 *.sqlite3*
