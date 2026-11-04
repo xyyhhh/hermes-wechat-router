@@ -4,6 +4,8 @@
 
 私聊和群聊都接收。插件内部只调用 TypeSafe 的 System One API；不调用聊天模型、不生成 LLM 摘要。后续 Kanban Agent 使用其 profile 的模型，属于另一次任务执行。
 
+修改外部消息监听器时，请直接参考 **[消息提供程序接入说明](docs/provider-api.md)**，包含字段映射、签名、投递确认和重试约定。
+
 ## 工作流程
 
 ```mermaid
