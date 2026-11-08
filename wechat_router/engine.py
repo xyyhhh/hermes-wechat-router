@@ -3,7 +3,8 @@ import hashlib
 import json
 import logging
 
-from .jev import build_request, validate_response
+from .config import TYPESAFE_ENDPOINT
+from .jev import JevError, build_request, validate_response
 from .store import LostLease
 
 logger = logging.getLogger(__name__)
@@ -131,6 +132,9 @@ class Engine:
         snapshot = json.loads(batch["snapshot"])
         kanban = self.kanban.for_board(snapshot["board"])
         if not batch["decision"]:
+            if (snapshot.get("provider", "typesafe") != self.cfg.provider or
+                    snapshot.get("provider_endpoint", TYPESAFE_ENDPOINT) != self.cfg.provider_endpoint):
+                raise JevError("jev_provider_changed")
             request = build_request(snapshot)
             response = await self.jev.evaluate(request)
             await self.db(self.store.record_call, batch, response)

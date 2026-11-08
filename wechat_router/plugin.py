@@ -23,7 +23,7 @@ def register(ctx):
     ctx.register_platform(
         name="wechat_router", label="WeChat Message Router", adapter_factory=factory,
         check_fn=check_requirements, validate_config=validate_config,
-        required_env=["WECHAT_ROUTER_SECRET", "TYPESAFE_API_KEY"],
-        install_hint="Configure the wechat_router platform and its two profile secrets.",
+        required_env=["WECHAT_ROUTER_SECRET"],
+        install_hint="Configure the platform, HMAC secret and selected provider's API key in the Dashboard.",
         emoji="📥",
     )

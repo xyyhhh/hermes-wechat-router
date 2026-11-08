@@ -1,7 +1,7 @@
 name: wechat-router
 label: WeChat Message Router
 kind: platform
-version: 0.2.0
+version: 0.3.0
 description: Batch incoming WeChat messages, ask Jev for typed decisions, and route follow-up work through Hermes Kanban.
 author: xyyhhh
 license: MIT
@@ -13,7 +13,4 @@ provides_tools:
 requires_env:
   - name: WECHAT_ROUTER_SECRET
     description: HMAC secret shared with your external message listener.
-    password: true
-  - name: TYPESAFE_API_KEY
-    description: TypeSafe API key used only for Jev System One requests.
     password: true

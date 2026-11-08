@@ -13,7 +13,7 @@
     const [error, setError] = React.useState("");
     const [notice, setNotice] = React.useState("");
     const [busy, setBusy] = React.useState(false);
-    const [keys, setKeys] = React.useState({ WECHAT_ROUTER_SECRET: "", TYPESAFE_API_KEY: "" });
+    const [keys, setKeys] = React.useState({ WECHAT_ROUTER_SECRET: "", TYPESAFE_API_KEY: "", WECHAT_ROUTER_API_KEY: "" });
     const [statusError, setStatusError] = React.useState("");
     const profile = config && config.profile;
     const scoped = (path) => path + (profile ? "?profile=" + encodeURIComponent(profile) : "");
@@ -42,7 +42,7 @@
     async function act(action) {
       setBusy(true); setError(""); setNotice("");
       try { await action(); }
-      catch (_) { setError("操作失败。请检查配置范围、本人 ID、时区和现有 profile 名称，然后重试。"); }
+      catch (_) { setError("操作失败。请检查 provider 地址、提示词、本人 ID、时区和 profile 名称，然后重试。"); }
       finally { setBusy(false); }
     }
     function change(name, value) {
@@ -120,10 +120,31 @@
               h("select", { name: "mode", value: s.mode, disabled: busy, onChange: e => change("mode", e.target.value) },
                 h("option", { value: "observe" }, "观察：调用 Jev，记录判断"), h("option", { value: "active" }, "执行：调用 Jev，并派发任务")),
               h("small", null, "两种模式均产生 Jev 费用；观察模式不创建 Kanban 任务。")),
-            field("model", "Jev 模型"), field("owner_name", "本人称呼"), field("timezone", "时区"),
+            field("owner_name", "本人称呼"), field("timezone", "时区"),
             list("owner_ids", "本人的微信 ID", "每行一个；使用消息源实际发送的 sender_id。执行模式必填。"),
             list("interests", "关注事项", "每行一项，帮助判断群聊中与自己相关的信息。"),
             list("sources", "消息源筛选", "每行一个 source；留空接收全部来源。私聊和群聊均处理。"))),
+        h("section", { className: "wr-card" }, h("h2", null, "Jev Provider"),
+          h("div", { className: "wr-grid" },
+            h("label", { className: "wr-field" }, h("span", null, "服务提供商"),
+              h("select", { name: "provider", value: s.provider, disabled: busy, onChange: e => change("provider", e.target.value) },
+                h("option", { value: "typesafe" }, "TypeSafe 官方"),
+                h("option", { value: "custom" }, "第三方 · System One 兼容"))),
+            field("model", "模型 ID", "填写服务商实际提供的模型名称，例如 jev-latest。"),
+            field("request_timeout", "请求超时（秒）", "按服务商的响应速度调整。", { type: "number", min: 0.1, step: 0.1 }),
+            s.provider === "custom" && field("provider_base_url", "API 地址", "填写含版本路径的 Base URL（如 https://provider.example/v1），或完整 /systemone 地址。")),
+          h("p", { className: "wr-muted" }, s.provider === "custom"
+            ? "请求使用 TypeSafe System One 格式和 Bearer 认证。请在下方保存 WECHAT_ROUTER_API_KEY；不会使用官方 key 或自动回退到官方服务。"
+            : "使用 https://api.typesafe.ai/v1/systemone，请在下方保存 TYPESAFE_API_KEY。"),
+          h("p", { className: "wr-muted" }, "修改后保存配置并重启 Gateway。保存页面不会向服务商发出请求。")),
+        h("section", { className: "wr-card" }, h("h2", null, "Jev 判断提示词"),
+          h("label", { className: "wr-field" }, h("span", null, "总体判断规则"),
+            h("textarea", { name: "jev_instructions", rows: 7, maxLength: 12000, disabled: busy,
+              value: s.jev_instructions, onChange: e => change("jev_instructions", e.target.value) }),
+            h("small", null, "作为 state.routing_policy 发送给 Jev，可修改相关性、群聊、预约和忽略规则。分类选项和输出字段由插件维护。最多 12,000 字符；较长提示词会增加每批输入 token。")),
+          h("div", { className: "wr-actions" },
+            button("恢复默认提示词", () => change("jev_instructions", config.defaults.jev_instructions), !config.defaults),
+            h("span", { className: "wr-muted" }, "恢复后需保存；已有批次保留原提示词。"))),
         h("section", { className: "wr-card" }, h("h2", null, "消息合并与判断"),
           h("div", { className: "wr-grid" },
             field("quiet_seconds", "静默合并窗口（秒）", "同一会话停止来信多久后开始判断。", { type: "number", min: 0.1, step: 0.1 }),
@@ -146,19 +167,19 @@
           h("span", null, "保存后重启 Gateway；不会自动重启。"))),
       h("section", { className: "wr-card" }, h("h2", null, "凭据"),
         h("p", { className: "wr-muted" }, "通过 Hermes 的凭据接口单独保存；已有值不回显。保存后重启 Gateway。"),
-        ...Object.entries(keys).map(([name, value]) => h("div", { className: "wr-secret", key: name },
+        ...["WECHAT_ROUTER_SECRET", s.provider === "custom" ? "WECHAT_ROUTER_API_KEY" : "TYPESAFE_API_KEY"].map(name => h("div", { className: "wr-secret", key: name },
           h("label", { className: "wr-field" }, h("span", null, name + (config.secrets[name] ? " · 已配置" : " · 未配置")),
-            h("input", { name, type: "password", autoComplete: "new-password", value, disabled: busy,
+            h("input", { name, type: "password", autoComplete: "new-password", value: keys[name], disabled: busy,
               onChange: e => setKeys(old => ({ ...old, [name]: e.target.value })) }),
-            h("small", null, name === "WECHAT_ROUTER_SECRET" ? "与外部监听器共享，至少 32 字节。" : "TypeSafe 的 Jev API key。")),
+            h("small", null, name === "WECHAT_ROUTER_SECRET" ? "与外部监听器共享，至少 32 字节。" : name === "TYPESAFE_API_KEY" ? "仅用于 TypeSafe 官方服务。" : "仅用于当前配置的第三方 System One 服务。")),
           button("保存凭据", () => act(async () => {
             try {
               await SDK.fetchJSON(scoped("/api/env"), { method: "PUT", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ key: name, value }) });
+                body: JSON.stringify({ key: name, value: keys[name] }) });
               setConfig(old => ({ ...old, secrets: { ...old.secrets, [name]: true } }));
               setNotice(name + " 已保存。请重启 Gateway 后使用新凭据。");
             } finally { setKeys(old => ({ ...old, [name]: "" })); }
-          }), !value.trim() || (name === "WECHAT_ROUTER_SECRET" && new TextEncoder().encode(value).length < 32))))));
+          }), !keys[name].trim() || (name === "WECHAT_ROUTER_SECRET" && new TextEncoder().encode(keys[name]).length < 32))))));
   }
   window.__HERMES_PLUGINS__.register("wechat-router", Page);
 })();

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+
+- Configure a third-party TypeSafe System One compatible provider, base/full API URL, model and timeout.
+- Separate third-party API credentials from the official TypeSafe key; never fall back between providers.
+- Edit the Jev routing policy in the Dashboard and restore the built-in policy.
+- Persist the provider and policy with each batch; prevent pending retries from silently switching providers.
+
+## 0.2.0
+
+- Web Dashboard sidebar page for configuration, credentials, counters, pause/resume and failed-batch retries.
+- Profile-scoped backend API and prebuilt frontend assets; no frontend build required for installation.
+
 ## 0.1.0
 
 - Signed HTTP ingress for private and group WeChat messages.

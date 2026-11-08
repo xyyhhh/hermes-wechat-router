@@ -17,6 +17,10 @@ platforms:
       quiet_seconds: 8
       max_wait_seconds: 60
       model: jev-latest
+      provider: typesafe # custom for a third-party TypeSafe System One compatible service
+      provider_base_url: "" # e.g. https://provider.example/v1; uses WECHAT_ROUTER_API_KEY
+      # jev_instructions: | # optional; omit to use the built-in policy
+      #   Focus on appointments, deadlines and important events relevant to the owner.
       board: default
       triage_profile: inbox
       routes:

@@ -59,6 +59,18 @@ def test_save_only_patches_plugin_fields_and_preserves_advanced_settings(ui):
     assert config == original
 
 
+def test_provider_and_prompt_can_be_saved_without_model_calls(ui):
+    client, _, writes, _ = ui
+    patch = {"provider": "custom", "provider_base_url": "https://provider.example/v1",
+             "model": "provider-jev", "jev_instructions": "本人被明确提及的事项才交接。"}
+    response = client.put("/api/plugins/wechat-router/config", json={"enabled": False, "settings": patch})
+    assert response.status_code == 200
+    assert writes[0][0]["platforms"]["wechat_router"]["extra"] == patch
+    config = client.get("/api/plugins/wechat-router/config").json()
+    assert config["defaults"]["jev_instructions"]
+    assert config["secrets"]["WECHAT_ROUTER_API_KEY"] is True
+
+
 @pytest.mark.parametrize("patch", [
     {"mode": "active"}, {"timezone": "Not/A/Timezone"}, {"quiet_seconds": 100},
     {"port": True}, {"routes": {}}, {"hermes_bin": "arbitrary-command"},

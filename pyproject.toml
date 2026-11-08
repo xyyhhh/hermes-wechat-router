@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-wechat-router"
-version = "0.2.0"
+version = "0.3.0"
 description = "A Hermes gateway plugin for Jev-powered WeChat message triage"
 requires-python = ">=3.11"
 dependencies = ["aiohttp>=3.10,<4"]

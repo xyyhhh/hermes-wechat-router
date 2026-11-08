@@ -14,9 +14,10 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
   let paused = false;
   let failure = true;
   const config = {
-    profile: "work", version: "0.2.0", enabled: true, secrets: { TYPESAFE_API_KEY: true },
-    settings: { mode: "observe", model: "jev-latest", owner_name: "我", owner_ids: ["me"], interests: [], sources: [],
-      timezone: "Asia/Shanghai", quiet_seconds: 8, max_wait_seconds: 60, max_batch_messages: 12,
+    profile: "work", version: "0.3.0", enabled: true, secrets: { TYPESAFE_API_KEY: true },
+    defaults: { jev_instructions: "默认判断规则" },
+    settings: { mode: "observe", model: "jev-latest", provider: "typesafe", provider_base_url: "", jev_instructions: "默认判断规则", owner_name: "我", owner_ids: ["me"], interests: [], sources: [],
+      timezone: "Asia/Shanghai", quiet_seconds: 8, max_wait_seconds: 60, max_batch_messages: 12, request_timeout: 15,
       max_context_chars: 6000, min_confidence: 0.6, board: "default", triage_profile: "inbox", host: "127.0.0.1", port: 8768,
       routes: Object.fromEntries(["schedule", "deadline", "todo", "important", "other"].map(x => [x, "inbox"])) }
   };
@@ -36,13 +37,14 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
   dom.window.eval(fs.readFileSync("dashboard/dist/index.js", "utf8"));
   const root = createRoot(document.getElementById("root"));
   async function click(label) {
-    const button = [...document.querySelectorAll("button")].find(b => b.textContent === label);
+    const button = [...document.querySelectorAll("button")].find(b => b.textContent === label && !b.disabled);
     assert.ok(button, label);
     await React.act(async () => { button.click(); });
   }
   async function input(name, value) {
     const element = document.querySelector(`[name="${name}"]`);
-    const descriptor = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value");
+    const prototype = element.tagName === "TEXTAREA" ? dom.window.HTMLTextAreaElement.prototype : dom.window.HTMLInputElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
     await React.act(async () => {
       descriptor.set.call(element, value);
       element.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
@@ -53,6 +55,15 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
     assert.match(document.body.textContent, /Profile: work/);
     assert.match(document.body.textContent, /42/);
     assert.equal(document.querySelector('[name="TYPESAFE_API_KEY"]').value, "");
+    await React.act(async () => {
+      const select = document.querySelector('[name="provider"]');
+      select.value = "custom";
+      select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    assert.ok(document.querySelector('[name="WECHAT_ROUTER_API_KEY"]'));
+    assert.equal(document.querySelector('[name="TYPESAFE_API_KEY"]'), null);
+    await input("provider_base_url", "https://provider.example/v1");
+    await input("jev_instructions", "只关注本人已确认的预约");
     await click("暂停处理");
     assert.equal(paused, true);
     await click("恢复处理");
@@ -65,6 +76,8 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
     });
     const saved = requests.find(x => x.url.includes("/config?") && x.options.method === "PUT");
     assert.equal(saved.body.settings.owner_name, "本人改名");
+    assert.equal(saved.body.settings.provider_base_url, "https://provider.example/v1");
+    assert.equal(saved.body.settings.jev_instructions, "只关注本人已确认的预约");
     assert.match(saved.url, /profile=work/);
     await input("WECHAT_ROUTER_SECRET", "synthetic-new-secret-at-least-32-bytes");
     await click("保存凭据");
@@ -72,6 +85,12 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
     assert.equal(secret.body.value, "synthetic-new-secret-at-least-32-bytes");
     assert.match(secret.url, /profile=work/);
     assert.equal(document.querySelector('[name="WECHAT_ROUTER_SECRET"]').value, "");
+    await input("WECHAT_ROUTER_API_KEY", "synthetic-custom-key");
+    await click("保存凭据");
+    assert.ok(requests.find(x => x.body && x.body.key === "WECHAT_ROUTER_API_KEY" && x.body.value === "synthetic-custom-key"));
+    assert.equal(document.querySelector('[name="WECHAT_ROUTER_API_KEY"]').value, "");
+    await click("恢复默认提示词");
+    assert.equal(document.querySelector('[name="jev_instructions"]').value, "默认判断规则");
     assert.ok(requests.every(x => !x.url.includes("jev") && !x.url.includes("typesafe")));
   } finally {
     await React.act(async () => { root.unmount(); });

@@ -33,15 +33,17 @@ class WechatRouterAdapter(BasePlatformAdapter):
             return True
         cfg = self.settings
         secret = get_scoped_secret("WECHAT_ROUTER_SECRET", "")
-        api_key = get_scoped_secret("TYPESAFE_API_KEY", "")
+        api_key = get_scoped_secret(cfg.provider_key_name, "")
         if not api_key:
-            raise ValueError("TYPESAFE_API_KEY is not configured for this profile")
+            raise ValueError(f"{cfg.provider_key_name} is not configured for this profile")
         store = await asyncio.to_thread(Store, data_path(self.home))
         app = make_app(store, cfg, secret)
         try:
             self._session = ClientSession(trust_env=False)
             kanban = KanbanClient(cfg, self.home)
-            engine = Engine(store, cfg, JevClient(self._session, api_key, cfg.request_timeout), kanban)
+            client = JevClient(self._session, api_key, cfg.request_timeout,
+                               endpoint=cfg.provider_endpoint if cfg.provider == "custom" else None)
+            engine = Engine(store, cfg, client, kanban)
             self._runner = web.AppRunner(app, access_log=None)
             await self._runner.setup()
             await web.TCPSite(self._runner, cfg.host, cfg.port).start()

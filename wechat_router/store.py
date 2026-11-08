@@ -185,7 +185,10 @@ class Store:
                             "mode": cfg.mode, "routes": cfg.routes, "triage_profile": cfg.triage_profile,
                             "board": cfg.board, "min_confidence": cfg.min_confidence,
                             "owner_name": cfg.owner_name, "owner_ids": list(cfg.owner_ids),
-                            "interests": list(cfg.interests), "timezone": cfg.timezone, "model": cfg.model}
+                            "interests": list(cfg.interests), "timezone": cfg.timezone, "model": cfg.model,
+                            "provider": cfg.provider, "provider_base_url": cfg.provider_base_url,
+                            "provider_endpoint": cfg.provider_endpoint,
+                            "jev_instructions": cfg.jev_instructions}
                 batch["snapshot"] = encode(snapshot)
                 c.execute("UPDATE batches SET snapshot=? WHERE id=?", (batch["snapshot"], batch["id"]))
             batch.update(lease=token, status="processing", attempts=batch["attempts"] + 1)

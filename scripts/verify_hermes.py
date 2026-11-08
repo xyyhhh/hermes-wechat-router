@@ -43,7 +43,7 @@ def main():
         wrapper.chmod(0o700)
         env = {"HERMES_HOME": str(home), "PYTHONPATH": os.pathsep.join((str(source), str(plugin))),
                "WECHAT_ROUTER_SECRET": "synthetic-fixture-secret-" * 3,
-               "TYPESAFE_API_KEY": "synthetic-fixture-key"}
+               "TYPESAFE_API_KEY": "", "WECHAT_ROUTER_API_KEY": "synthetic-custom-fixture-key"}
         with patch.dict(os.environ, env):
             from hermes_cli.plugin_dev import doctor_plugin
             report = doctor_plugin(plugin)
@@ -93,6 +93,14 @@ def verify_dashboard(plugin, home):
         assert saved["model"]["default"] == "fixture-preserve-model"
         assert saved["platforms"]["wechat_router"]["extra"]["retry_seconds"] == 20
         assert saved["platforms"]["wechat_router"]["extra"]["owner_name"] == "fixture-owner"
+        custom = {"provider": "custom", "provider_base_url": "https://provider.example/v1",
+                  "jev_instructions": "只关注本人的预约和截止事项。"}
+        response = client.put(prefix + "/config", json={"enabled": False, "settings": custom})
+        assert response.status_code == 200, response.text
+        saved = client.get(prefix + "/config").json()
+        assert saved["settings"]["provider_base_url"] == custom["provider_base_url"]
+        assert saved["settings"]["jev_instructions"] == custom["jev_instructions"]
+        assert "synthetic-custom-fixture-key" not in json.dumps(saved)
     print("Dashboard discovery, real API mount and profile-scoped config persistence: passed")
 
 
@@ -107,7 +115,9 @@ async def exercise(home, wrapper):
 
     requests = []
     async def evaluate(request):
+        assert request.headers["Authorization"] == "Bearer synthetic-custom-fixture-key"
         payload = await request.json()
+        assert payload["state"]["routing_policy"] == "集成测试自定义判断规则"
         requests.append(payload)
         answers = {}
         for key in payload["questions"]:
@@ -127,6 +137,8 @@ async def exercise(home, wrapper):
         "quiet_seconds": .1, "max_wait_seconds": .2, "poll_seconds": .01, "hermes_bin": str(wrapper),
     })
     async with TestServer(app) as server, ClientSession(trust_env=False) as session:
+        config.extra.update(provider="custom", provider_base_url=str(server.make_url("/v1")),
+                            jev_instructions="集成测试自定义判断规则")
         with patch.object(JevClient, "ENDPOINT", str(server.make_url("/v1/systemone"))):
             adapter = WechatRouterAdapter(config)
             try:

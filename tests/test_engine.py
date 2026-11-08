@@ -42,6 +42,35 @@ class FakeKanban:
         return {"task": {"id": task, "status": self.previous_status}}
 
 
+async def test_pending_inference_does_not_move_messages_to_a_different_provider(store, cfg):
+    batch = ready_batch(store, cfg)
+    changed = replace(cfg, provider="custom", provider_base_url="https://another.example/v1")
+    jev, kb = FakeJev(), FakeKanban()
+    with pytest.raises(JevError, match="jev_provider_changed"):
+        await Engine(store, changed, jev, kb).process(batch)
+    assert jev.calls == 0 and not kb.cards
+
+
+async def test_snapshot_preserves_user_prompt_across_a_retry(store, cfg):
+    cfg = replace(cfg, jev_instructions="原先的判断规则")
+    batch = ready_batch(store, cfg)
+    newer = replace(cfg, jev_instructions="新的判断规则")
+    class CaptureJev(FakeJev):
+        async def evaluate(self, request):
+            assert request["state"]["routing_policy"] == "原先的判断规则"
+            return await super().evaluate(request)
+    await Engine(store, newer, CaptureJev(), FakeKanban()).process(batch)
+
+
+async def test_equivalent_full_endpoint_does_not_block_pending_inference(store, cfg):
+    cfg = replace(cfg, provider="custom", provider_base_url="https://provider.example/v1")
+    batch = ready_batch(store, cfg)
+    changed = replace(cfg, provider_base_url="https://provider.example/v1/systemone")
+    jev = FakeJev()
+    await Engine(store, changed, jev, FakeKanban()).process(batch)
+    assert jev.calls == 1
+
+
 @pytest.mark.parametrize("mode", ["observe", "active"])
 async def test_ignore_never_calls_agent_or_board(store, cfg, mode):
     cfg = replace(cfg, mode=mode)

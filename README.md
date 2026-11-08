@@ -2,7 +2,7 @@
 
 把外部监听器提交的微信消息合并成批次，用 **Jev** 判断与账号本人有关的预约、期限、待办和重要事件，再通过 **Hermes 原生 Kanban** 交给已有的专业 profile。
 
-私聊和群聊都接收。插件内部只调用 TypeSafe 的 System One API；不调用聊天模型、不生成 LLM 摘要。后续 Kanban Agent 使用其 profile 的模型，属于另一次任务执行。
+私聊和群聊都接收。插件内部只调用所配置 provider 的 TypeSafe System One 兼容 API；不调用聊天模型、不生成 LLM 摘要。后续 Kanban Agent 使用其 profile 的模型，属于另一次任务执行。
 
 修改外部消息监听器时，请直接参考 **[消息提供程序接入说明](docs/provider-api.md)**，包含字段映射、签名、投递确认和重试约定。
 
@@ -38,12 +38,13 @@ hermes plugins install xyyhhh/hermes-wechat-router --enable
 
 插件是一个由 Gateway 管理的入站平台，平台名为 `wechat_router`，安装 ID 为 `wechat-router`。它需要在 Gateway 所属 profile 运行；平台适配器使用 Hermes 的 in-process 扩展方式。
 
-安装/配置时为该 profile 设置两个密钥：
+安装/配置时为该 profile 设置 HMAC 密钥，以及所选 provider 的 API key：
 
 | 名称 | 用途 |
 |---|---|
 | `WECHAT_ROUTER_SECRET` | 与外部监听器共享的 HMAC 密钥，至少 32 字节 |
-| `TYPESAFE_API_KEY` | TypeSafe Jev API key |
+| `TYPESAFE_API_KEY` | 选择 TypeSafe 官方服务时使用 |
+| `WECHAT_ROUTER_API_KEY` | 选择第三方 System One 兼容服务时使用，与官方 key 独立 |
 
 使用 Hermes 自带的安装提示或下述 Dashboard 页面录入密钥。插件通过 Hermes 的 profile secret 接口读取，不自行解析 `.env` 或其他凭据文件。
 
@@ -63,6 +64,7 @@ hermes plugins update wechat-router
 
 - 启用平台、观察/执行模式、本人 ID、关注事项、来源筛选和时区。
 - Jev 模型、消息合并窗口、每批上限、上下文上限和置信度阈值。
+- 0.3.0 起支持第三方 System One provider 的 API 地址、独立凭据和请求超时，以及自定义 Jev 判断提示词和恢复默认规则。
 - Kanban 看板、各分类的目标 profile 和复核 profile。
 - 监听地址/端口，以及单独保存两个凭据。已有密钥只显示是否配置，不回显。
 - 消息数量、插件内部 Jev 调用/token 统计、暂停/恢复、失败批次重试。
@@ -70,6 +72,8 @@ hermes plugins update wechat-router
 **保存配置或凭据后，重启当前 profile 的 Gateway 生效。** 页面不会自动重启服务；暂停/恢复立即写入收件箱，进行中的批次可能继续完成。重试可能产生新的 Jev 调用。页面展示的处理开关不是 Gateway 在线探测，token 数据不包含下游 agent。
 
 配置 API 使用 Dashboard 的认证与 profile 隔离；消息监听器仍使用原来的 HMAC 接入端口，两者独立。只打开页面、刷新统计或保存配置均不会调用模型。页面未覆盖的高级参数继续在 YAML 中维护，保存页面配置会保留这些参数。
+
+第三方服务和自定义提示词的配置示例、接口要求与重试规则见 [模型 Provider 与提示词](docs/model-provider.md)。仅支持 TypeSafe System One 协议，不把 OpenAI Chat Completions 接口当作兼容接口使用。
 
 ### YAML 配置
 
@@ -201,7 +205,7 @@ hermes wechat-router retry <batch_id>
 
 插件对普通失败不承诺网络调用恰好一次；如果 Jev 已完成而进程在保存响应前崩溃，恢复时仍可能再次调用。评论按标记尽力去重，Kanban 卡片由原生幂等键去重。不要并行运行多个监听实例指向同一事件库，也不要在任务完成记录前手动归档刚创建的卡。
 
-只发往固定的 TypeSafe HTTPS API，不进行跨提供商回退；不跟随认证重定向，HTTP 客户端不继承代理环境变量。模型调用的原始错误、认证头和正文不会进入插件日志。密钥可以用 Hermes 已有的 secret source 管理。
+模型请求只发往所选 provider，不进行跨提供商回退。第三方服务使用独立 key，不会收到官方 key；不跟随认证重定向，HTTP 客户端不继承代理环境变量。远程 provider 要求 HTTPS，本机回环代理允许 HTTP。模型调用的原始错误、认证头和正文不会进入插件日志。密钥可以用 Hermes 已有的 secret source 管理。
 
 ## 模型与 token
 

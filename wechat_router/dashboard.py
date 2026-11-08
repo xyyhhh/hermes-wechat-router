@@ -10,7 +10,8 @@ from zoneinfo import ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Body, HTTPException
 
-from .config import Settings, data_path
+from . import __version__
+from .config import DEFAULT_JEV_INSTRUCTIONS, Settings, data_path
 from .store import Store
 
 router = APIRouter()
@@ -18,6 +19,7 @@ EDITABLE = frozenset({
     "host", "port", "mode", "owner_name", "owner_ids", "interests", "sources", "timezone",
     "quiet_seconds", "max_wait_seconds", "max_batch_messages", "max_context_chars",
     "min_confidence", "model", "board", "triage_profile", "routes",
+    "provider", "provider_base_url", "jev_instructions", "request_timeout",
 })
 
 
@@ -40,7 +42,7 @@ def _validated(extra):
         return Settings.parse(extra)
     except (ValueError, TypeError, ZoneInfoNotFoundError):
         # Validation exceptions can include submitted values. Never echo arbitrary input.
-        raise HTTPException(422, "配置无效：检查时区、数值范围、完整的分类路由；active 模式需要本人 ID。") from None
+        raise HTTPException(422, "配置无效：检查 provider 地址、提示词、时区、数值和分类路由；active 模式需要本人 ID。") from None
 
 
 @router.get("/config")
@@ -57,11 +59,12 @@ def get_config():
         error = exc.detail
     home = _home()
     return {
-        "version": "0.2.0", "enabled": bool(platform.get("enabled", False)),
+        "version": __version__, "enabled": bool(platform.get("enabled", False)),
         "settings": {k: v for k, v in extra.items() if k in EDITABLE},
         "profile": home.name if home.parent.name == "profiles" else "default",
         "validation_error": error,
-        "secrets": {k: bool(get_scoped_secret(k)) for k in ("WECHAT_ROUTER_SECRET", "TYPESAFE_API_KEY")},
+        "secrets": {k: bool(get_scoped_secret(k)) for k in ("WECHAT_ROUTER_SECRET", "TYPESAFE_API_KEY", "WECHAT_ROUTER_API_KEY")},
+        "defaults": {"jev_instructions": DEFAULT_JEV_INSTRUCTIONS},
     }
 
 

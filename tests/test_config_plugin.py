@@ -14,6 +14,34 @@ def test_bad_config_rejected(raw):
         Settings.parse(raw)
 
 
+@pytest.mark.parametrize("url", ["", "https://", "ftp://example.com/v1", "http://example.com/v1",
+                                "https://user:secret@example.com/v1", "https://example.com/v1?key=secret",
+                                "https://example.com/v1#fragment", "https://example.com:bad/v1",
+                                "https://example.com:0/v1", "https://example.com/\nv1"])
+def test_provider_rejects_invalid_or_sensitive_url(url):
+    with pytest.raises(ValueError):
+        Settings.parse({"provider": "custom", "provider_base_url": url})
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("https://example.com/v1/", "https://example.com/v1/systemone"),
+    ("https://example.com/v1/systemone", "https://example.com/v1/systemone"),
+    ("http://localhost:8000/v1", "http://localhost:8000/v1/systemone"),
+    ("http://127.0.0.1:8000/v1", "http://127.0.0.1:8000/v1/systemone"),
+])
+def test_custom_provider_endpoint_and_separate_key(url, expected):
+    cfg = Settings.parse({"provider": "custom", "provider_base_url": url})
+    assert cfg.provider_endpoint == expected
+    assert cfg.provider_key_name == "WECHAT_ROUTER_API_KEY"
+    assert Settings().provider_key_name == "TYPESAFE_API_KEY"
+
+
+@pytest.mark.parametrize("prompt", ["", " ", 123, "x" * 12001])
+def test_prompt_must_be_nonempty_and_bounded(prompt):
+    with pytest.raises(ValueError):
+        Settings.parse({"jev_instructions": prompt})
+
+
 def test_registration_imports_no_adapter_or_inference_client():
     root = Path(__file__).resolve().parents[1]
     spec = importlib.util.spec_from_file_location("router_test_plugin", root / "__init__.py",
