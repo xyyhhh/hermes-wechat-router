@@ -120,6 +120,8 @@
               h("select", { name: "mode", value: s.mode, disabled: busy, onChange: e => change("mode", e.target.value) },
                 h("option", { value: "observe" }, "观察：调用 Jev，记录判断"), h("option", { value: "active" }, "执行：调用 Jev，并派发任务")),
               h("small", null, "两种模式均产生 Jev 费用；观察模式不创建 Kanban 任务。")),
+            h("label", { className: "wr-checkbox" }, h("input", { type: "checkbox", name: "receive_only", checked: !!s.receive_only,
+              disabled: busy, onChange: e => change("receive_only", e.target.checked) }), "仅接收并暂存，不调用 Jev、不派单（无需模型 key；保存后重启 Gateway）"),
             field("owner_name", "本人称呼"), field("timezone", "时区"),
             list("owner_ids", "本人的微信 ID", "每行一个；使用消息源实际发送的 sender_id。执行模式必填。"),
             list("interests", "关注事项", "每行一项，帮助判断群聊中与自己相关的信息。"),

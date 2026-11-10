@@ -55,6 +55,7 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
     assert.match(document.body.textContent, /Profile: work/);
     assert.match(document.body.textContent, /42/);
     assert.equal(document.querySelector('[name="TYPESAFE_API_KEY"]').value, "");
+    await React.act(async () => { document.querySelector('[name="receive_only"]').click(); });
     await React.act(async () => {
       const select = document.querySelector('[name="provider"]');
       select.value = "custom";
@@ -76,6 +77,7 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
     });
     const saved = requests.find(x => x.url.includes("/config?") && x.options.method === "PUT");
     assert.equal(saved.body.settings.owner_name, "本人改名");
+    assert.equal(saved.body.settings.receive_only, true);
     assert.equal(saved.body.settings.provider_base_url, "https://provider.example/v1");
     assert.equal(saved.body.settings.jev_instructions, "只关注本人已确认的预约");
     assert.match(saved.url, /profile=work/);

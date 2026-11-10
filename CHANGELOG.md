@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1
+
+- Add an explicit receive-only mode: accept and deduplicate signed messages
+  without a model API key, inference worker or task dispatcher.
+- Expose the mode in Dashboard; preserve paused storage until processing is
+  deliberately configured and resumed.
+- Extend synthetic HTTP and actual Hermes adapter integration checks.
+
 ## 0.3.0
 
 - Configure a third-party TypeSafe System One compatible provider, base/full API URL, model and timeout.

@@ -16,7 +16,7 @@ from .store import Store
 
 router = APIRouter()
 EDITABLE = frozenset({
-    "host", "port", "mode", "owner_name", "owner_ids", "interests", "sources", "timezone",
+    "host", "port", "mode", "receive_only", "owner_name", "owner_ids", "interests", "sources", "timezone",
     "quiet_seconds", "max_wait_seconds", "max_batch_messages", "max_context_chars",
     "min_confidence", "model", "board", "triage_profile", "routes",
     "provider", "provider_base_url", "jev_instructions", "request_timeout",

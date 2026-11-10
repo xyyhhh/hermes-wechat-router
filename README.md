@@ -103,6 +103,13 @@ platforms:
 
 默认只绑定回环地址。远程监听器通过部署方已有的 HTTPS 入口访问；`host`、`port` 可以配置。插件会在 Gateway 启动时启动 HTTP 接口和队列处理器，关闭时停止接收并取消处理；已接收的消息和未完成批次留在事件库中恢复。
 
+0.3.1 起可在 Dashboard 勾选「仅接收并暂存」，或设置 `extra.receive_only: true`。
+此模式只启动签名接收接口并持久化消息，不创建模型客户端、分析线程或 Kanban
+派单器，因此不需要模型 API key。接收库会同时设为暂停；即使误点恢复，也不会
+启动后台分析。以后配置 provider/key、关闭此选项并重启 Gateway，再恢复队列处理。
+`observe` 模式会调用模型，与仅接收模式不同。跨主机也可通过固定端点的 SSH
+加密转送访问回环接口，无需将明文 HTTP 暴露到局域网。
+
 ```sh
 hermes plugins doctor ~/.hermes/plugins/wechat-router --ci
 hermes gateway restart

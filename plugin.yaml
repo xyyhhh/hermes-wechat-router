@@ -1,7 +1,7 @@
 name: wechat-router
 label: WeChat Message Router
 kind: platform
-version: 0.3.0
+version: 0.3.1
 description: Batch incoming WeChat messages, ask Jev for typed decisions, and route follow-up work through Hermes Kanban.
 author: xyyhhh
 license: MIT

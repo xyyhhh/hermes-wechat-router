@@ -64,6 +64,7 @@ def main():
 
 
 def verify_dashboard(plugin, home):
+    import inspect
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from hermes_cli.config import load_config, save_config
@@ -73,7 +74,14 @@ def verify_dashboard(plugin, home):
     save_config({"plugins": {"enabled": ["wechat-router"], "isolation": "in_process"},
                  "model": {"default": "fixture-preserve-model"},
                  "platforms": {"wechat_router": {"enabled": True, "extra": {"retry_seconds": 20}}}})
-    entry = next(p for p in _discover_dashboard_plugins([(plugin.parent, "user")]) if p["name"] == "wechat-router")
+    if inspect.signature(_discover_dashboard_plugins).parameters:
+        discovered = _discover_dashboard_plugins([(plugin.parent, "user")])
+    else:
+        installed = home / "plugins" / "wechat-router"
+        installed.parent.mkdir(exist_ok=True)
+        installed.symlink_to(plugin, target_is_directory=True)
+        discovered = _discover_dashboard_plugins()
+    entry = next(p for p in discovered if p["name"] == "wechat-router")
     assert entry["tab"]["path"] == "/wechat-router" and not entry["tab"].get("hidden")
     for key in ("entry", "css", "_api_file"):
         assert (Path(entry["_dir"]) / entry[key]).is_file()
@@ -112,6 +120,8 @@ async def exercise(home, wrapper):
     from wechat_router.http import PREFIX, signature
     from wechat_router.jev import JevClient
     from wechat_router.kanban import KanbanClient
+    from wechat_router.config import data_path
+    from wechat_router.store import Store
 
     requests = []
     async def evaluate(request):
@@ -180,6 +190,22 @@ async def exercise(home, wrapper):
                 await adapter.disconnect()
             assert adapter._worker is None and adapter._runner is None and adapter._session is None
             print("Gateway adapter shutdown: passed")
+
+    # Exercise the new no-key mode against the actual Hermes adapter API.
+    import wechat_router.adapter as adapter_module
+    receive_config = PlatformConfig(enabled=True, extra={"port": port, "receive_only": True})
+    with patch.object(adapter_module, "get_scoped_secret", side_effect=lambda name, default="":
+                      os.environ["WECHAT_ROUTER_SECRET"] if name == "WECHAT_ROUTER_SECRET" else ""), \
+         patch.object(adapter_module, "JevClient", side_effect=AssertionError("Unexpected model client")), \
+         patch.object(adapter_module, "KanbanClient", side_effect=AssertionError("Unexpected dispatcher")):
+        receiver = WechatRouterAdapter(receive_config)
+        try:
+            assert await receiver.connect()
+            assert receiver._worker is None and receiver._session is None
+            assert Store(data_path(home)).paused()
+            print("Actual Hermes receive-only adapter without model key: passed")
+        finally:
+            await receiver.disconnect()
 
 
 if __name__ == "__main__":

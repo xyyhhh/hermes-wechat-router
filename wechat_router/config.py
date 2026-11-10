@@ -21,6 +21,7 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8768
     mode: str = "observe"
+    receive_only: bool = False
     owner_name: str = "微信账号本人"
     owner_ids: tuple[str, ...] = ()
     interests: tuple[str, ...] = ()
@@ -75,6 +76,8 @@ class Settings:
         return result
 
     def validate(self) -> None:
+        if type(self.receive_only) is not bool:
+            raise ValueError("receive_only must be a boolean")
         if self.provider not in ("typesafe", "custom"):
             raise ValueError("provider must be typesafe or custom")
         if not isinstance(self.provider_base_url, str):
