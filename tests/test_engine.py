@@ -89,14 +89,17 @@ async def test_observe_records_decision_but_no_tasks(store, cfg):
     assert store.event_status("listener", "1")["outcome"] == "observed"
 
 
-async def test_one_call_handles_multiple_topics_and_links_short_replies(store, cfg):
+async def test_one_call_hands_all_topics_to_one_main_assistant(store, cfg):
     cfg = replace(cfg, mode="active")
     batch = ready_batch(store, cfg, message(cfg, "1"), message(cfg, "2", text="好的"),
                         message(cfg, "3", text="另一个事项"))
     jev, kb = FakeJev(links={"m1": "m0"}), FakeKanban()
     await Engine(store, cfg, jev, kb).process(batch)
     assert jev.calls == 1
-    assert len(kb.cards) == 2
+    assert len(kb.cards) == 1
+    card = next(iter(kb.cards.values()))
+    assert card["profile"] == "assistant"
+    assert "另一个事项" in card["body"] and "好的" in card["body"]
 
 
 async def test_retry_after_board_commit_does_not_repeat_inference_or_task(store, cfg):
@@ -115,8 +118,7 @@ async def test_retry_after_board_commit_does_not_repeat_inference_or_task(store,
     assert len(kb.cards) == 1
 
 
-@pytest.mark.parametrize("status,has_parent", [("running", True), ("ready", True), ("done", False), ("blocked", False)])
-async def test_existing_thread_update_has_durable_followup(store, cfg, status, has_parent):
+async def test_related_tasks_are_context_for_the_main_assistant(store, cfg):
     cfg = replace(cfg, mode="active")
     first = ready_batch(store, cfg)
     jev, kb = FakeJev(), FakeKanban()
@@ -124,42 +126,41 @@ async def test_existing_thread_update_has_durable_followup(store, cfg, status, h
     await engine.process(first)
     second = ready_batch(store, cfg, message(cfg, "2", text="改到周六"))
     engine.jev = FakeJev(links={"m0": "t0"})
-    kb.previous_status = status
     await engine.process(second)
-    assert len(kb.cards) == 2 and len(kb.comments) == 1
+    assert len(kb.cards) == 2 and not kb.comments
     last = list(kb.cards.values())[-1]
-    assert bool(last["parent"]) == has_parent
+    assert last["parent"] is None
+    assert '"related_threads"' in last["body"] and "t_1" in last["body"]
+    assert last["profile"] == "assistant"
     with store.connection() as c:
-        assert c.execute("SELECT COUNT(*) FROM threads").fetchone()[0] == 1
+        assert c.execute("SELECT COUNT(*) FROM threads").fetchone()[0] == 2
 
 
 async def test_watch_is_available_to_later_batch(store, cfg):
+    cfg = replace(cfg, decision_mode="choice")
     first = ready_batch(store, cfg)
     await Engine(store, cfg, FakeJev({"m0": "watch"}), FakeKanban()).process(first)
     second = ready_batch(store, cfg, message(cfg, "2", text="周五三点就这么定了"))
     assert len(json.loads(second["snapshot"])["candidates"]) == 1
 
 
-def test_low_confidence_act_goes_to_triage(store, cfg):
-    cfg = replace(cfg, triage_profile="triage", routes={k: "specialist" for k in cfg.routes})
+def test_low_confidence_act_still_goes_to_main_assistant(store, cfg):
+    cfg = replace(cfg, decision_mode="choice", assistant_profile="main", triage_profile="triage", routes={k: "specialist" for k in cfg.routes})
     batch = ready_batch(store, cfg)
     snap = json.loads(batch["snapshot"])
     req = build_request(snap)
     result = response(req)
-    result["answers"]["m0_action"]["confidence"] = .2
+    result["answers"]["needs_followup"]["confidence"] = .2
     plan = make_plan(batch, snap, validate_response(result, req))
-    assert plan[0]["profile"] == "triage"
+    assert plan[0]["profile"] == "main" and plan[0]["action"] == "review"
 
 
-def test_invalid_link_or_confidence_is_not_a_decision(store, cfg):
+@pytest.mark.parametrize("value", [True, float("nan"), -0.1, 1.1, "yes"])
+def test_invalid_noul_is_not_a_decision(store, cfg, value):
     batch = ready_batch(store, cfg)
     req = build_request(json.loads(batch["snapshot"]))
     result = response(req)
-    result["answers"]["m0_link"]["choice"] = "t999"
-    with pytest.raises(JevError):
-        validate_response(result, req)
-    result = response(req)
-    result["answers"]["m0_action"]["confidence"] = float("nan")
+    result["answers"]["needs_followup"]["noul"] = value
     with pytest.raises(JevError):
         validate_response(result, req)
 
@@ -195,11 +196,11 @@ async def test_board_change_does_not_carry_foreign_task_ids(store, cfg):
     old = replace(cfg, mode="active")
     first = ready_batch(store, old)
     await Engine(store, old, FakeJev(), FakeKanban()).process(first)
-    new = replace(cfg, board="another")
+    new = replace(cfg, board="another", decision_mode="choice")
     second = ready_batch(store, new, message(cfg, "2"))
     await Engine(store, new, FakeJev({"m0": "watch"}, {"m0": "t0"}), FakeKanban()).process(second)
     with store.connection() as c:
-        row = c.execute("SELECT task_id,board FROM threads").fetchone()
+        row = c.execute("SELECT task_id,board FROM threads ORDER BY updated_at DESC LIMIT 1").fetchone()
     assert row["board"] == "another" and row["task_id"] is None
 
 

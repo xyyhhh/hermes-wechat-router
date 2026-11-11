@@ -43,4 +43,6 @@ jobs:
         with:
           python-version: '3.14'
       - run: python -m pip install -e '.[test]' ruamel.yaml python-dotenv rich requests croniter pydantic tomli-w loguru
-      - run: python scripts/verify_hermes.py --hermes-source .hermes-reference
+      - run: |
+          python scripts/verify_hermes.py --hermes-source .hermes-reference --decision-mode bool
+          python scripts/verify_hermes.py --hermes-source .hermes-reference --decision-mode choice

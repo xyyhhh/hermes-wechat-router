@@ -4,7 +4,6 @@
   const SDK = window.__HERMES_PLUGIN_SDK__;
   const React = SDK.React;
   const h = React.createElement;
-  const categories = { schedule: "时间预约", deadline: "截止日期", todo: "待办事项", important: "重要事件", other: "其他" };
   const base = "/api/plugins/wechat-router";
 
   function Page() {
@@ -15,6 +14,7 @@
     const [busy, setBusy] = React.useState(false);
     const [keys, setKeys] = React.useState({ WECHAT_ROUTER_SECRET: "", TYPESAFE_API_KEY: "", WECHAT_ROUTER_API_KEY: "" });
     const [statusError, setStatusError] = React.useState("");
+    const [preview, setPreview] = React.useState(null);
     const profile = config && config.profile;
     const scoped = (path) => path + (profile ? "?profile=" + encodeURIComponent(profile) : "");
     const request = (path, method, body) => SDK.fetchJSON(scoped(base + path), {
@@ -46,7 +46,14 @@
       finally { setBusy(false); }
     }
     function change(name, value) {
+      setPreview(null);
       setConfig(old => ({ ...old, settings: { ...old.settings, [name]: value } }));
+    }
+    function textField(name, label, hint, value, onChange) {
+      return h("label", { className: "wr-field", key: name }, h("span", null, label),
+        h("textarea", { name, rows: 3, maxLength: 4000, disabled: busy,
+          value: value === undefined ? config.settings[name] : value,
+          onChange: onChange || (e => change(name, e.target.value)) }), h("small", null, hint));
     }
     function field(name, label, hint, options) {
       const opts = options || {};
@@ -81,7 +88,7 @@
 
     return h("main", { className: "wr-page" },
       h("header", { className: "wr-header" }, h("div", null, h("h1", null, "微信消息分流"),
-        h("p", null, "微信消息 → 按会话合并 → Jev 判断 → Kanban 派单")),
+        h("p", null, "微信消息 → 按会话合并 → Jev 事件初筛 → 主助理处理和委派")),
         h("span", { className: "wr-pill" }, "Profile: " + profile + " · v" + config.version)),
       error && h("p", { className: "wr-alert", role: "alert" }, error),
       notice && h("p", { className: "wr-notice", role: "status" }, notice),
@@ -143,23 +150,40 @@
           h("label", { className: "wr-field" }, h("span", null, "总体判断规则"),
             h("textarea", { name: "jev_instructions", rows: 7, maxLength: 12000, disabled: busy,
               value: s.jev_instructions, onChange: e => change("jev_instructions", e.target.value) }),
-            h("small", null, "作为 state.routing_policy 发送给 Jev，可修改相关性、群聊、预约和忽略规则。分类选项和输出字段由插件维护。最多 12,000 字符；较长提示词会增加每批输入 token。")),
+            h("small", null, "作为 state.routing_policy 发送给 Jev，描述什么事件需要跟进。主助理负责具体分类、拆分、合并和委派。最多 12,000 字符；较长提示词会增加每批输入 token。")),
           h("div", { className: "wr-actions" },
             button("恢复默认提示词", () => change("jev_instructions", config.defaults.jev_instructions), !config.defaults),
             h("span", { className: "wr-muted" }, "恢复后需保存；已有批次保留原提示词。"))),
+        h("section", { className: "wr-card" }, h("h2", null, "Jev 请求配置"),
+          h("p", { className: "wr-muted" }, "每个合并批次只问一个问题。Jev 不选择 agent；命中事件统一交给下方主助理。"),
+          h("label", { className: "wr-field" }, h("span", null, "判断模式"),
+            h("select", { name: "decision_mode", value: s.decision_mode, disabled: busy,
+              onChange: e => change("decision_mode", e.target.value) },
+              h("option", { value: "bool" }, "布尔 · 是否存在需跟进事件（Noul）"),
+              h("option", { value: "choice" }, "选择 · 忽略 / 观察 / 交主助理（Choice）"))),
+          textField("decision_question", "判断问题", "此文本是该批次唯一问题的 instructions。"),
+          s.decision_mode === "bool" ? h("div", { className: "wr-grid" },
+            field("bool_threshold", "交接概率阈值", "Jev 返回是的概率；达到阈值就交主助理，否则忽略本批。", { type: "number", min: 0.01, max: 0.99, step: 0.01 }),
+            textField("positive_criteria", "是：需要跟进", "作为 criteria.true。"),
+            textField("negative_criteria", "否：无需跟进", "作为 criteria.false。")) :
+            h("div", { className: "wr-grid" },
+              ...[["ignore", "忽略"], ["watch", "继续观察"], ["act", "交主助理"]].map(([key, label]) =>
+                textField("criterion-" + key, label + "的判定说明", "选项键固定为 " + key + "，可编辑说明。",
+                  s.choice_criteria[key], e => change("choice_criteria", { ...s.choice_criteria, [key]: e.target.value }))),
+              field("min_confidence", "选择模式复核阈值", "act 低于此置信度时，仍交同一主助理并标记为待核对。", { type: "number", min: 0, max: 1, step: 0.05 })),
+          h("div", { className: "wr-actions" }, button("预览请求 JSON", () => act(async () => {
+            setPreview(await request("/request-preview", "POST", { settings: normalized() }));
+          })), h("span", { className: "wr-muted" }, "使用表单草稿和消息占位符；不读取真实消息、不调用模型。")),
+          preview && h("pre", { className: "wr-preview", "aria-label": "Jev 请求 JSON" }, JSON.stringify(preview.request, null, 2))),
         h("section", { className: "wr-card" }, h("h2", null, "消息合并与判断"),
           h("div", { className: "wr-grid" },
             field("quiet_seconds", "静默合并窗口（秒）", "同一会话停止来信多久后开始判断。", { type: "number", min: 0.1, step: 0.1 }),
             field("max_wait_seconds", "最长等待（秒）", "持续活跃的群聊也会按此窗口切批。", { type: "number", min: 0.1, step: 0.1 }),
             field("max_batch_messages", "每批消息上限", "范围 1–20；达到上限可提前判断。", { type: "number", min: 1, max: 20, step: 1 }),
-            field("max_context_chars", "历史上下文字符上限", "限制每次判断携带的历史内容。", { type: "number", min: 1, step: 1 }),
-            field("min_confidence", "最低判断置信度", "低于阈值的候选交由复核 profile。", { type: "number", min: 0, max: 1, step: 0.05 }))),
-        h("section", { className: "wr-card" }, h("h2", null, "Kanban 路由"),
-          h("p", { className: "wr-muted" }, "填写已创建的 Hermes profile 名称。每个分类可复用同一个 agent。"),
-          h("div", { className: "wr-grid" }, field("board", "看板名称"), field("triage_profile", "不确定事项复核 profile"),
-            ...Object.entries(categories).map(([category, label]) => h("label", { className: "wr-field", key: category },
-              h("span", null, label + " → profile"), h("input", { name: "route-" + category, value: s.routes[category], disabled: busy,
-                onChange: e => change("routes", { ...s.routes, [category]: e.target.value }) }))))),
+            field("max_context_chars", "历史上下文字符上限", "限制每次判断携带的历史内容。", { type: "number", min: 1, step: 1 }))),
+        h("section", { className: "wr-card" }, h("h2", null, "统一交主助理"),
+          h("p", { className: "wr-muted" }, "一个命中批次生成一条 Kanban 任务，附该批次全部消息、上下文和已有线索。由主助理决定后续 agent。"),
+          h("div", { className: "wr-grid" }, field("board", "看板名称"), field("assistant_profile", "主助理 profile", "填写已创建的主助理，默认 assistant。"))),
         h("section", { className: "wr-card" }, h("h2", null, "消息接入"),
           h("div", { className: "wr-grid" }, field("host", "监听地址"), field("port", "监听端口", null,
             { type: "number", min: 1, max: 65535, step: 1 })),

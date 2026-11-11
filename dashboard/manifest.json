@@ -3,7 +3,7 @@
   "label": "微信消息分流",
   "description": "配置微信消息合并、Jev 判断和 Kanban 分流，查看处理状态。",
   "icon": "MessageSquare",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "tab": {"path": "/wechat-router", "position": "after:kanban"},
   "entry": "dist/index.js",
   "css": "dist/style.css",

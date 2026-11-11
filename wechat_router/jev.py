@@ -3,7 +3,10 @@
 import json
 import math
 
-from .config import CATEGORIES, DEFAULT_JEV_INSTRUCTIONS, TYPESAFE_ENDPOINT
+from dataclasses import asdict
+
+from .config import (DEFAULT_CHOICE_CRITERIA, DEFAULT_EVENT_QUESTION, DEFAULT_JEV_INSTRUCTIONS,
+                     DEFAULT_NEGATIVE_CRITERIA, DEFAULT_POSITIVE_CRITERIA, TYPESAFE_ENDPOINT)
 
 
 class JevError(RuntimeError):
@@ -23,36 +26,21 @@ def build_request(snapshot):
         "existing_threads": [{"ref": f"t{i}", "category": t["category"], "phase": t["phase"],
                               "excerpt": t["excerpt"]} for i, t in enumerate(snapshot["candidates"])],
     }
-    questions = {}
-    for i, _ in enumerate(messages):
-        focus = f"按 routing_policy，只判断 messages 中 ref=m{i}："
-        questions[f"m{i}_action"] = {
-            "type": "choice", "instructions": focus + "是否需要后续处理？",
-            "criteria": {
-                "ignore": "与本人无关、普通闲聊、广告、重复表述且没有新事务信息，不需处理。",
-                "watch": "出现可能与本人有关的预约/期限/承诺线索，但尚不足以值得启动处理，等待后文。",
-                "act": "存在与本人有关、值得核对的预约、截止期限、待办、重要通知或已有事项确认/改期/取消。",
-            },
-        }
-        questions[f"m{i}_category"] = {
-            "type": "choice", "instructions": focus + "该消息涉及哪一类后续处理？",
-            "criteria": dict(zip(CATEGORIES, ("预约、见面、活动及改期取消", "提交、缴费、报名等截止期限",
-                                             "承诺、请求或需要跟进的行动", "值得本人关注的重要事件或通知", "其他或无法确定"))),
-        }
-        links = {"new": "本批次尚未出现的新事务，或不确定能否关联已有事务。"}
-        links.update({f"m{j}": f"与 messages 中 ref=m{j} 是同一个具体事务。" for j in range(i)})
-        links.update({f"t{j}": f"与 existing_threads 中 ref=t{j} 是同一个具体事务。"
-                      for j in range(len(snapshot["candidates"]))})
-        questions[f"m{i}_link"] = {
-            "type": "choice", "instructions": focus + "属于哪个具体事务？不能只因类别相同而合并。",
-            "criteria": links,
-        }
-        questions[f"m{i}_phase"] = {
-            "type": "choice", "instructions": focus + "消息表达的事务状态是什么？",
-            "criteria": {"proposed": "提议或尚未确认", "confirmed": "本人或相关方已经明确确认",
-                         "change": "修改已有安排或提供新信息", "cancel": "取消已有安排", "info": "其他通知或待办信息"},
-        }
-    return {"model": snapshot["model"], "state": state, "questions": questions}
+    question = {"instructions": snapshot.get("decision_question", DEFAULT_EVENT_QUESTION)}
+    if snapshot.get("decision_mode", "bool") == "bool":
+        question.update(type="noul", criteria={
+            "true": snapshot.get("positive_criteria", DEFAULT_POSITIVE_CRITERIA),
+            "false": snapshot.get("negative_criteria", DEFAULT_NEGATIVE_CRITERIA),
+        })
+    else:
+        question.update(type="choice", criteria=snapshot.get("choice_criteria", DEFAULT_CHOICE_CRITERIA))
+    return {"model": snapshot["model"], "state": state, "questions": {"needs_followup": question}}
+
+
+def preview_request(settings):
+    snapshot = asdict(settings)
+    snapshot.update(messages=[{"text": "（此处为合并后的消息；预览不读取真实消息）"}], context=[], candidates=[])
+    return build_request(snapshot)
 
 
 def validate_response(response, request):
@@ -62,6 +50,13 @@ def validate_response(response, request):
     validated = {}
     for key, question in request["questions"].items():
         answer = answers.get(key)
+        if question["type"] == "noul":
+            value = answer.get("noul") if isinstance(answer, dict) else None
+            if (not isinstance(answer, dict) or answer.get("type") != "noul" or isinstance(value, bool)
+                    or not isinstance(value, (float, int)) or not math.isfinite(value) or not 0 <= value <= 1):
+                raise JevError("jev_invalid_noul")
+            validated[key] = {"noul": value}
+            continue
         if not isinstance(answer, dict) or answer.get("type") != "choice" or answer.get("choice") not in question["criteria"]:
             raise JevError("jev_invalid_choice")
         confidence = answer.get("confidence")

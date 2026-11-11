@@ -21,6 +21,7 @@ from unittest.mock import patch
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--hermes-source", required=True, type=Path)
+    parser.add_argument("--decision-mode", choices=("bool", "choice"), default="bool")
     args = parser.parse_args()
     source = args.hermes_source.resolve()
     plugin = Path(__file__).resolve().parents[1]
@@ -29,9 +30,10 @@ def main():
     with tempfile.TemporaryDirectory(prefix="wechat-router-integration-") as directory:
         home = Path(directory)
         (home / "config.yaml").write_text("{}\n")
-        profile = home / "profiles" / "inbox"
-        profile.mkdir(parents=True)
-        (profile / "config.yaml").write_text("{}\n")
+        for name in ("inbox", "assistant"):
+            profile = home / "profiles" / name
+            profile.mkdir(parents=True)
+            (profile / "config.yaml").write_text("{}\n")
         wrapper = home / "hermes-fixture-cli"
         wrapper.write_text(f"#!{sys.executable}\n" +
                           "import argparse,sys\n"
@@ -58,7 +60,7 @@ def main():
             register(PluginContext(manifest, manager))
             try:
                 verify_dashboard(plugin, home)
-                asyncio.run(exercise(home, wrapper))
+                asyncio.run(exercise(home, wrapper, args.decision_mode))
             finally:
                 manager.unload()
 
@@ -109,10 +111,14 @@ def verify_dashboard(plugin, home):
         assert saved["settings"]["provider_base_url"] == custom["provider_base_url"]
         assert saved["settings"]["jev_instructions"] == custom["jev_instructions"]
         assert "synthetic-custom-fixture-key" not in json.dumps(saved)
+        preview = client.post(prefix + "/request-preview", json={"settings": {"decision_mode": "choice"}})
+        assert preview.status_code == 200, preview.text
+        assert preview.json()["request"]["questions"]["needs_followup"]["type"] == "choice"
+        assert not preview.json()["calls_model"] and not preview.json()["reads_messages"]
     print("Dashboard discovery, real API mount and profile-scoped config persistence: passed")
 
 
-async def exercise(home, wrapper):
+async def exercise(home, wrapper, decision_mode):
     from types import SimpleNamespace
     from aiohttp import ClientSession, web
     from aiohttp.test_utils import TestServer
@@ -133,11 +139,11 @@ async def exercise(home, wrapper):
         assert payload["state"]["routing_policy"] == "集成测试自定义判断规则"
         requests.append(payload)
         answers = {}
-        for key in payload["questions"]:
-            ref, field = key.split("_")
-            value = {"action": "act", "category": "schedule", "phase": "proposed",
-                     "link": "m0" if ref == "m1" else "new"}[field]
-            answers[key] = {"type": "choice", "choice": value, "confidence": .95}
+        assert set(payload["questions"]) == {"needs_followup"}
+        question = payload["questions"]["needs_followup"]
+        assert question["instructions"] == "集成测试批次事件问题"
+        answers["needs_followup"] = ({"type": "noul", "noul": .95} if decision_mode == "bool" else
+                                      {"type": "choice", "choice": "act", "confidence": .95})
         return web.json_response({"answers": answers, "model": "jev-synthetic-fixture",
                                   "usage": {"input_tokens": 200, "output_tokens": 40}})
     app = web.Application()
@@ -148,6 +154,7 @@ async def exercise(home, wrapper):
     config = PlatformConfig(enabled=True, extra={
         "port": port, "mode": "active", "owner_ids": ["fixture-owner"],
         "quiet_seconds": .1, "max_wait_seconds": .2, "poll_seconds": .01, "hermes_bin": str(wrapper),
+        "decision_mode": decision_mode, "decision_question": "集成测试批次事件问题",
     })
     async with TestServer(app) as server, ClientSession(trust_env=False) as session:
         config.extra.update(provider="custom", provider_base_url=str(server.make_url("/v1")),
@@ -187,10 +194,10 @@ async def exercise(home, wrapper):
                 assert len(outcome["tasks"]) == 1
                 board = KanbanClient(adapter.settings, home)
                 task = await board.show(outcome["tasks"][0]["task_id"])
-                assert task["task"]["assignee"] == "inbox"
+                assert task["task"]["assignee"] == "assistant"
                 assert task["task"]["status"] == "ready"
                 assert "fixture-group" in task["task"]["body"]
-                print("HTTP ingress -> batched Jev fixture -> real Hermes Kanban: passed")
+                print(f"HTTP ingress -> one {decision_mode} question -> main assistant via real Hermes Kanban: passed")
             finally:
                 await adapter.disconnect()
             assert adapter._worker is None and adapter._runner is None and adapter._session is None

@@ -24,7 +24,7 @@ async def test_custom_provider_uses_configured_url_and_key_with_same_protocol(st
     async with TestServer(app) as server, ClientSession(trust_env=False) as session:
         client = JevClient(session, "synthetic-custom-key", endpoint=str(server.make_url("/custom/v1/systemone")))
         result = await client.evaluate(req)
-        assert validate_response(result, req)["answers"]["m0_action"]["choice"] == "act"
+        assert validate_response(result, req)["answers"]["needs_followup"]["noul"] == .95
 
 
 def test_old_batch_keeps_original_default_prompt(store, cfg):
@@ -48,7 +48,7 @@ async def test_real_http_protocol_with_local_fixture(store, cfg, monkeypatch):
     async with TestServer(app) as server, ClientSession(trust_env=False) as session:
         monkeypatch.setattr(JevClient, "ENDPOINT", str(server.make_url("/v1/systemone")))
         result = await JevClient(session, "synthetic-test-key").evaluate(req)
-        assert validate_response(result, req)["answers"]["m0_action"]["choice"] == "act"
+        assert validate_response(result, req)["answers"]["needs_followup"]["noul"] == .95
         assert seen == [req]
 
 

@@ -22,10 +22,9 @@ platforms:
       # jev_instructions: | # optional; omit to use the built-in policy
       #   Focus on appointments, deadlines and important events relevant to the owner.
       board: default
-      triage_profile: inbox
-      routes:
-        schedule: calendar
-        deadline: assistant
-        todo: assistant
-        important: assistant
-        other: inbox
+      assistant_profile: assistant
+      decision_mode: bool # bool -> native Noul; choice -> ignore/watch/act
+      bool_threshold: 0.6
+      # decision_question: Does this batch contain an event the main assistant should follow up?
+      # positive_criteria: Relevant appointments, deadlines, commitments or important updates.
+      # negative_criteria: Chitchat or unrelated/duplicate messages with no follow-up needed.

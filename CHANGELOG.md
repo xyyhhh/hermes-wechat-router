@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+- Ask one event-detection question per merged batch; hand all actionable events to one main assistant.
+- Configure native bool/Noul or Choice modes, question text, probability threshold and criteria in Dashboard.
+- Preview the actual request JSON without inference, real messages or configuration writes.
+- Main assistant receives the whole batch, context and related tasks for classification, splitting and delegation.
+- Preserve receive-only mode and cached decisions; migrate undecided old batches and retarget only uncreated legacy tasks.
+- Keep old routes/triage YAML readable for compatibility; new handoffs ignore category routing.
+
 ## 0.3.2
 
 - Accept GatewayRunner's two injected session flags while retaining strict

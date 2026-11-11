@@ -14,12 +14,13 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
   let paused = false;
   let failure = true;
   const config = {
-    profile: "work", version: "0.3.0", enabled: true, secrets: { TYPESAFE_API_KEY: true },
+    profile: "work", version: "0.4.0", enabled: true, secrets: { TYPESAFE_API_KEY: true },
     defaults: { jev_instructions: "默认判断规则" },
     settings: { mode: "observe", model: "jev-latest", provider: "typesafe", provider_base_url: "", jev_instructions: "默认判断规则", owner_name: "我", owner_ids: ["me"], interests: [], sources: [],
       timezone: "Asia/Shanghai", quiet_seconds: 8, max_wait_seconds: 60, max_batch_messages: 12, request_timeout: 15,
-      max_context_chars: 6000, min_confidence: 0.6, board: "default", triage_profile: "inbox", host: "127.0.0.1", port: 8768,
-      routes: Object.fromEntries(["schedule", "deadline", "todo", "important", "other"].map(x => [x, "inbox"])) }
+      max_context_chars: 6000, min_confidence: 0.6, board: "default", assistant_profile: "assistant", host: "127.0.0.1", port: 8768,
+      decision_mode: "bool", decision_question: "是否有需跟进事件？", bool_threshold: 0.6,
+      positive_criteria: "有事件", negative_criteria: "无事件", choice_criteria: { ignore: "忽略", watch: "观察", act: "交主助理" } }
   };
   let Component;
   dom.window.__HERMES_PLUGINS__ = { register(name, value) { assert.equal(name, "wechat-router"); Component = value; } };
@@ -32,6 +33,9 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
       usage: { calls: 4, input_tokens: 200, output_tokens: 80 }, failures: failure ? [{ id: "batch-1", error: "fixture_error" }] : [] };
     if (url.includes("/pause")) { paused = body.paused; return { paused }; }
     if (url.includes("/retry")) { failure = false; return { queued: true }; }
+    if (url.includes("/request-preview")) return { request: { model: body.settings.model,
+      questions: { needs_followup: { type: body.settings.decision_mode === "bool" ? "noul" : "choice",
+        instructions: body.settings.decision_question, criteria: body.settings.choice_criteria } } }, calls_model: false, reads_messages: false };
     return { ok: true };
   } };
   dom.window.eval(fs.readFileSync("dashboard/dist/index.js", "utf8"));
@@ -65,6 +69,20 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
     assert.equal(document.querySelector('[name="TYPESAFE_API_KEY"]'), null);
     await input("provider_base_url", "https://provider.example/v1");
     await input("jev_instructions", "只关注本人已确认的预约");
+    assert.equal(document.querySelector('[name="route-schedule"]'), null);
+    await input("assistant_profile", "main");
+    await input("bool_threshold", "0.75");
+    await click("预览请求 JSON");
+    assert.match(document.querySelector('.wr-preview').textContent, /noul/);
+    await React.act(async () => {
+      const select = document.querySelector('[name="decision_mode"]');
+      select.value = "choice";
+      select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    await input("decision_question", "整批是否需要主助理跟进？");
+    await input("criterion-act", "有预约或期限");
+    await click("预览请求 JSON");
+    assert.match(document.querySelector('.wr-preview').textContent, /有预约或期限/);
     await click("暂停处理");
     assert.equal(paused, true);
     await click("恢复处理");
@@ -80,6 +98,10 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
     assert.equal(saved.body.settings.receive_only, true);
     assert.equal(saved.body.settings.provider_base_url, "https://provider.example/v1");
     assert.equal(saved.body.settings.jev_instructions, "只关注本人已确认的预约");
+    assert.equal(saved.body.settings.assistant_profile, "main");
+    assert.equal(saved.body.settings.decision_mode, "choice");
+    assert.equal(saved.body.settings.decision_question, "整批是否需要主助理跟进？");
+    assert.equal(saved.body.settings.choice_criteria.act, "有预约或期限");
     assert.match(saved.url, /profile=work/);
     await input("WECHAT_ROUTER_SECRET", "synthetic-new-secret-at-least-32-bytes");
     await click("保存凭据");

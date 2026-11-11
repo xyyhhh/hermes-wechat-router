@@ -71,6 +71,22 @@ def test_provider_and_prompt_can_be_saved_without_model_calls(ui):
     assert config["secrets"]["WECHAT_ROUTER_API_KEY"] is True
 
 
+@pytest.mark.parametrize("mode,kind", [("bool", "noul"), ("choice", "choice")])
+def test_request_preview_uses_draft_fields_without_saving_or_reading_messages(ui, mode, kind):
+    client, _, writes, home = ui
+    patch = {"decision_mode": mode, "decision_question": "自定义问题", "assistant_profile": "main"}
+    response = client.post("/api/plugins/wechat-router/request-preview", json={"settings": patch})
+    assert response.status_code == 200
+    preview = response.json()
+    question = preview["request"]["questions"]["needs_followup"]
+    assert question["type"] == kind and question["instructions"] == "自定义问题"
+    assert not preview["calls_model"] and not preview["reads_messages"]
+    assert "synthetic-secret" not in response.text
+    assert writes == [] and not data_path(home).exists()
+    config = client.get("/api/plugins/wechat-router/config").json()
+    assert "routes" not in config["settings"] and "triage_profile" not in config["settings"]
+
+
 @pytest.mark.parametrize("patch", [
     {"mode": "active"}, {"timezone": "Not/A/Timezone"}, {"quiet_seconds": 100},
     {"port": True}, {"routes": {}}, {"hermes_bin": "arbitrary-command"},

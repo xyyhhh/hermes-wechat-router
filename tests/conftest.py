@@ -34,6 +34,12 @@ def ready_batch(store, cfg, *messages):
 def response(request, actions=None, links=None):
     out = {"answers": {}, "model": "jev-test-fixture", "usage": {"input_tokens": 100, "output_tokens": 20}}
     for key, q in request["questions"].items():
+        if key == "needs_followup":
+            action = (actions or {}).get("batch", (actions or {}).get("m0", "act"))
+            out["answers"][key] = ({"type": "noul", "noul": .95 if action == "act" else .05}
+                                    if q["type"] == "noul" else
+                                    {"type": "choice", "choice": action, "confidence": .95})
+            continue
         i, kind = key.split("_")
         defaults = {"action": (actions or {}).get(i, "act"), "category": "schedule",
                     "link": (links or {}).get(i, "new"), "phase": "proposed"}

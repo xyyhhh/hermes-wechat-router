@@ -1,6 +1,6 @@
 # Hermes WeChat Router
 
-把外部监听器提交的微信消息合并成批次，用 **Jev** 判断与账号本人有关的预约、期限、待办和重要事件，再通过 **Hermes 原生 Kanban** 交给已有的专业 profile。
+把外部监听器提交的微信消息合并成批次，用 **Jev** 判断与账号本人有关的预约、期限、待办和重要事件，再通过 **Hermes 原生 Kanban** 统一交给主助理；由主助理分类、拆分、关联已有任务并委派专业 agent。
 
 私聊和群聊都接收。插件内部只调用所配置 provider 的 TypeSafe System One 兼容 API；不调用聊天模型、不生成 LLM 摘要。后续 Kanban Agent 使用其 profile 的模型，属于另一次任务执行。
 
@@ -13,18 +13,18 @@ flowchart TD
     A[外部监听器逐条提交消息] --> B[签名校验、去重、持久化]
     B --> C[按来源与聊天合并]
     C --> D[近期对话、待观察线索、相关事务]
-    D --> E[一次 Jev 请求，逐条判断并关联话题]
+    D --> E[一次 Jev 请求，一个批次事件问题]
     E --> F{处理结果}
     F -->|忽略| G[记录结果]
-    F -->|观察| H[保存线索，等待新消息]
-    F -->|处理| I[按配置选择 profile]
-    I --> J[创建或关联 Kanban 事务跟进任务]
-    J --> K[现有 Dispatcher 执行]
+    F -->|观察 Choice 模式| H[保存线索，等待新消息]
+    F -->|有需处理事件| I[创建一条主助理 Kanban 任务]
+    I --> J[主助理核对、拆分、合并]
+    J --> K[主助理按需要委派专业 agent]
 ```
 
 默认安静窗口 8 秒，最长等待 60 秒；达到 12 条消息也会提前形成批次。不同聊天互不合并，同一聊天的批次按接收顺序处理。每批正文最多 12,000 字符，近期上下文最多 6,000 字符，候选事务最多 8 个。以上是字符/条数上限，不是精确 token 上限。
 
-Jev 对批次内每条消息回答四个 Choice：`action`、`category`、`link`、`phase`。因此一批群消息中的不同话题可以分别派单；“好的”“改到周六”等回复也可以关联较早消息或已有事务。多条同一事务消息合并为一次处理。单条消息包含多个事项时，由接收任务的 Agent 进一步拆分。
+0.4.0 起，每个批次只问一个“是否有需处理事件”的问题，支持布尔（原生 Noul）或选择（Choice）模式。命中后将整个批次、近期上下文和已有任务线索交给配置的主助理（默认 `assistant`）。Jev 不再判断分类、选择 agent 或决定任务关联；这些由主助理处理。
 
 ## 安装
 
@@ -65,7 +65,8 @@ hermes plugins update wechat-router
 - 启用平台、观察/执行模式、本人 ID、关注事项、来源筛选和时区。
 - Jev 模型、消息合并窗口、每批上限、上下文上限和置信度阈值。
 - 0.3.0 起支持第三方 System One provider 的 API 地址、独立凭据和请求超时，以及自定义 Jev 判断提示词和恢复默认规则。
-- Kanban 看板、各分类的目标 profile 和复核 profile。
+- 0.4.0 起支持判断模式、判断问题、是/否说明、Choice 选项说明、阈值和请求 JSON 预览。
+- Kanban 看板与唯一的主助理 profile。
 - 监听地址/端口，以及单独保存两个凭据。已有密钥只显示是否配置，不回显。
 - 消息数量、插件内部 Jev 调用/token 统计、暂停/恢复、失败批次重试。
 
@@ -90,16 +91,12 @@ platforms:
       sources: [wechat-listener]
       timezone: Asia/Shanghai
       board: default
-      triage_profile: inbox
-      routes:
-        schedule: calendar
-        deadline: assistant
-        todo: assistant
-        important: assistant
-        other: inbox
+      assistant_profile: assistant
+      decision_mode: bool
+      bool_threshold: 0.6
 ```
 
-`owner_ids`、`sources`、路由中的 profile 名称需要按实际环境设置。提供自己发出的消息、发送者稳定 ID 和 `mentions`，才能更可靠地判断群聊相关性与预约确认状态。目标 profile 必须已经存在，插件不会自动创建 profile。
+`owner_ids`、`sources`、主助理 profile 名称需要按实际环境设置。提供自己发出的消息、发送者稳定 ID 和 `mentions`，才能更可靠地判断群聊相关性与预约确认状态。目标 profile 必须已经存在，插件不会自动创建 profile。
 
 默认只绑定回环地址。远程监听器通过部署方已有的 HTTPS 入口访问；`host`、`port` 可以配置。插件会在 Gateway 启动时启动 HTTP 接口和队列处理器，关闭时停止接收并取消处理；已接收的消息和未完成批次留在事件库中恢复。
 
@@ -178,21 +175,18 @@ python3 examples/send_event.py < examples/message.json
 
 `GET /wechat-router/v1/health` 无需签名，只返回插件名、版本和服务健康标识，不显示队列或消息。
 
-## 派单规则
+## 事件初筛与主助理交接
 
-- `ignore`：保存批次结果，不派单。
-- `watch`：保存事务线索；只有后续新消息才再次分析，不为它定时调用 Jev。
-- `act`：按类别配置的 profile 创建任务。
-- `act` 置信度不足、或类别置信度不足：交给 `triage_profile` 核对。
-- 关联不确定时不强行合并；后续 Agent 可根据原消息和已有任务继续核对。
+- `decision_mode: bool`：请求一个 `type: noul` 的问题，Jev 返回是的概率；达到 `bool_threshold` 时交主助理，否则忽略该批次。
+- `decision_mode: choice`：请求一个 Choice，`ignore` 忽略、`watch` 保留线索等待新消息、`act` 交主助理。低置信度的 act 仍交同一主助理，标记为需要核对。
+- 每个命中批次在 active 模式最多新建一条任务，统一指派 `assistant_profile`；主助理接收批次全部消息、上下文和已有事务线索。
+- 主助理判断具体事件、分类、拆分、合并和后续 agent，并遵循既有的日历/提醒/消息发送授权。
 
-`mode: observe` 会真实调用 Jev并记录判断/usage，但不创建 Kanban 卡。检查结果后改为 `mode: active` 并重启 Gateway。既有 observe 批次不会追溯建卡；进行中的 active 批次改为 observe 后也停止尚未发生的派单。
+`mode: observe` 真实调用 Jev 并记录判断/usage，但不创建任务；`receive_only: true` 仅接收暂存、不调用模型。检查结果后可关闭 receive_only、选择 active 并重启 Gateway，再恢复队列处理。
 
-任务正文是固定模板加消息原文，携带消息发送时间、时区和来源。Jev 不生成任务描述，不确定日期也不由插件编造。Agent 根据其现有职责与用户授权执行后续处理；本插件的任务模板只授权整理、核对、查询和提出候选处理，不自动授予发消息、写日历等权限。
+0.4.0 不再使用旧 `routes`、`triage_profile` 分类派单；旧 YAML 字段仍可读取，不会因升级丢失其他配置。已保存的旧判断直接复用，尚未创建的旧计划统一交当前主助理；已创建的任务不改派。旧版尚未推理的批次会补充并冻结新请求配置，保留原消息、模型、provider 和总体提示词。不会追溯派发已处理完的 observe 批次。
 
-已有事务收到新消息时，插件在原卡追加上下文并创建关联的跟进任务。原任务在 ready/running/todo/review 时，跟进任务依赖原任务完成；原卡已完成、被阻塞或被计划到未来时，跟进任务独立运行，避免新信息被阻塞状态困住。这样不会假设正在工作的 Agent 能实时读到后来追加的评论。
-
-这意味着复用的是 **profile 与事务关联**；插件不会直接向任意存活的 Agent 会话注入消息，也不修改它的运行中 prompt。
+每批的任务幂等键与完整计划会持久化，建卡失败重试不重新调用模型。事务关联交给主助理，插件不再根据 Jev 的 link 自动改写旧卡；已有任务线索会放入 `related_threads`，供主助理核对和去重。插件不向任意运行中的 agent 会话直接注入消息。
 
 ## 运维与恢复
 
@@ -216,7 +210,7 @@ hermes wechat-router retry <batch_id>
 
 ## 模型与 token
 
-插件只调用配置的 Jev 模型，默认 `jev-latest`。每批一个请求、每条消息四个 typed Choice，无另一个通用 LLM。实际开销取决于正文、上下文、候选事务和问题数量；使用 `status` 中的 `calls`、`input_tokens`、`output_tokens` 观察，不用字符数冒充实际 token 数。HTTP 故障时未拿到 usage 的请求无法从本地精确核算；Jev 真实调用与后续 Agent 都可能产生各自费用。
+插件只调用配置的 Jev 模型，默认 `jev-latest`；经 Magpie 等网关时需填写其实际开放的完整模型 ID（可能包含 provider 前缀）。每批一个请求、一个 Noul 或 Choice 问题，无另一个通用 LLM。实际开销取决于正文、上下文、候选事务和问题数量；使用 `status` 中的 `calls`、`input_tokens`、`output_tokens` 观察，不用字符数冒充实际 token 数。HTTP 故障时未拿到 usage 的请求无法从本地精确核算；Jev 真实调用与后续 Agent 都可能产生各自费用。
 
 ## 开发与验证
 
@@ -231,6 +225,6 @@ npm test
 
 单元/HTTP 测试使用合成消息与本机 Jev fixture。前端测试通过 React 和 jsdom 验证页面渲染、配置/凭据保存、暂停/恢复和重试；npm 依赖只用于开发测试。端到端脚本通过真实 Hermes Plugin Doctor、Dashboard 页面发现/后端加载/配置持久化、平台适配器启停和真实 Kanban CLI/数据库验证整条链路，但不调用真实 Jev、不访问真实微信，也不启动下游 Agent。这验证协议和恢复行为，不能替代实际消息上的分类质量评估。
 
-参考：[Hermes 插件开发](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins)、[平台适配器](https://hermes-agent.nousresearch.com/docs/developer-guide/adding-platform-adapters)、[Kanban](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban)、[TypeSafe API](https://docs.typesafe.ai/api/system-one)、[Choice](https://docs.typesafe.ai/primitives/choice)。
+参考：[Hermes 插件开发](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins)、[平台适配器](https://hermes-agent.nousresearch.com/docs/developer-guide/adding-platform-adapters)、[Kanban](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban)、[TypeSafe API](https://docs.typesafe.ai/api/system-one)、[Noul](https://docs.typesafe.ai/primitives/noul)、[Choice](https://docs.typesafe.ai/primitives/choice)。
 
 MIT License.

@@ -11,15 +11,17 @@ from zoneinfo import ZoneInfoNotFoundError
 from fastapi import APIRouter, Body, HTTPException
 
 from . import __version__
-from .config import DEFAULT_JEV_INSTRUCTIONS, Settings, data_path
+from .config import Settings, data_path
 from .store import Store
+from .jev import preview_request
 
 router = APIRouter()
 EDITABLE = frozenset({
     "host", "port", "mode", "receive_only", "owner_name", "owner_ids", "interests", "sources", "timezone",
     "quiet_seconds", "max_wait_seconds", "max_batch_messages", "max_context_chars",
-    "min_confidence", "model", "board", "triage_profile", "routes",
+    "min_confidence", "model", "board", "assistant_profile",
     "provider", "provider_base_url", "jev_instructions", "request_timeout",
+    "decision_mode", "decision_question", "bool_threshold", "positive_criteria", "negative_criteria", "choice_criteria",
 })
 
 
@@ -42,7 +44,7 @@ def _validated(extra):
         return Settings.parse(extra)
     except (ValueError, TypeError, ZoneInfoNotFoundError):
         # Validation exceptions can include submitted values. Never echo arbitrary input.
-        raise HTTPException(422, "配置无效：检查 provider 地址、提示词、时区、数值和分类路由；active 模式需要本人 ID。") from None
+        raise HTTPException(422, "配置无效：检查 provider、判断模式、问题、选项、阈值和主助理名称；active 模式需要本人 ID。") from None
 
 
 @router.get("/config")
@@ -64,7 +66,9 @@ def get_config():
         "profile": home.name if home.parent.name == "profiles" else "default",
         "validation_error": error,
         "secrets": {k: bool(get_scoped_secret(k)) for k in ("WECHAT_ROUTER_SECRET", "TYPESAFE_API_KEY", "WECHAT_ROUTER_API_KEY")},
-        "defaults": {"jev_instructions": DEFAULT_JEV_INSTRUCTIONS},
+        "defaults": {k: v for k, v in defaults.items() if k in {
+            "jev_instructions", "decision_mode", "decision_question", "bool_threshold",
+            "positive_criteria", "negative_criteria", "choice_criteria", "min_confidence"}},
     }
 
 
@@ -81,6 +85,14 @@ def put_config(body: dict[str, Any] = Body(...)):
     save_config({"platforms": {"wechat_router": {"enabled": body["enabled"], "extra": patch}}},
                 merge_existing=True)
     return {"ok": True, "restart_required": True}
+
+
+@router.post("/request-preview")
+def request_preview(body: dict[str, Any] = Body(...)):
+    if set(body) != {"settings"} or not isinstance(body["settings"], dict) or set(body["settings"]) - EDITABLE:
+        raise HTTPException(422, "Expected editable settings")
+    settings = _validated({**_platform().get("extra", {}), **body["settings"]})
+    return {"request": preview_request(settings), "calls_model": False, "reads_messages": False}
 
 
 def _store():

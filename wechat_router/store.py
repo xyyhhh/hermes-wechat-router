@@ -188,7 +188,11 @@ class Store:
                             "interests": list(cfg.interests), "timezone": cfg.timezone, "model": cfg.model,
                             "provider": cfg.provider, "provider_base_url": cfg.provider_base_url,
                             "provider_endpoint": cfg.provider_endpoint,
-                            "jev_instructions": cfg.jev_instructions}
+                            "jev_instructions": cfg.jev_instructions,
+                            "decision_mode": cfg.decision_mode, "decision_question": cfg.decision_question,
+                            "bool_threshold": cfg.bool_threshold, "positive_criteria": cfg.positive_criteria,
+                            "negative_criteria": cfg.negative_criteria, "choice_criteria": cfg.choice_criteria,
+                            "assistant_profile": cfg.assistant_profile}
                 batch["snapshot"] = encode(snapshot)
                 c.execute("UPDATE batches SET snapshot=? WHERE id=?", (batch["snapshot"], batch["id"]))
             batch.update(lease=token, status="processing", attempts=batch["attempts"] + 1)
@@ -213,6 +217,14 @@ class Store:
             for key, value in changes.items():
                 c.execute(f"UPDATE batches SET {key}=? WHERE id=?", (encode(value), batch["id"]))
                 batch[key] = encode(value)
+
+    def upgrade_snapshot(self, batch, snapshot):
+        """Fenced, one-time migration of an undecided pre-0.4 batch's request settings."""
+        encoded = encode(snapshot)
+        with self.connection(write=True) as c:
+            self.guard(c, batch)
+            c.execute("UPDATE batches SET snapshot=? WHERE id=?", (encoded, batch["id"]))
+        batch["snapshot"] = encoded
 
     def record_call(self, batch, response):
         usage = response.get("usage", {})
