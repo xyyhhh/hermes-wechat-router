@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- Accept GatewayRunner's two injected session flags while retaining strict
+  validation of Router settings.
+- Verify platform creation through the real GatewayRunner registry path.
+
 ## 0.3.1
 
 - Add an explicit receive-only mode: accept and deduplicate signed messages

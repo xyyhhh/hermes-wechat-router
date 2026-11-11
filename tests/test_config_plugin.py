@@ -14,6 +14,13 @@ def test_bad_config_rejected(raw):
         Settings.parse(raw)
 
 
+def test_gateway_injected_session_flags_are_not_router_configuration():
+    cfg = Settings.parse({'receive_only': True, 'group_sessions_per_user': True, 'thread_sessions_per_user': False})
+    assert cfg.receive_only
+    with pytest.raises(ValueError):
+        Settings.parse({'group_sessions_per_user_typo': True})
+
+
 @pytest.mark.parametrize("url", ["", "https://", "ftp://example.com/v1", "http://example.com/v1",
                                 "https://user:secret@example.com/v1", "https://example.com/v1?key=secret",
                                 "https://example.com/v1#fragment", "https://example.com:bad/v1",

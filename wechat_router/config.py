@@ -14,6 +14,7 @@ DEFAULT_JEV_INSTRUCTIONS = (
     "群聊中他人之间的安排不自动属于本人，明确覆盖本人的群体通知也可以相关。"
 )
 TYPESAFE_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
+FRAMEWORK_EXTRA_KEYS = frozenset({'group_sessions_per_user', 'thread_sessions_per_user'})
 
 
 @dataclass(frozen=True)
@@ -60,10 +61,12 @@ class Settings:
         raw = raw or {}
         if not isinstance(raw, dict):
             raise ValueError("platform extra must be an object")
-        unknown = set(raw) - {f.name for f in fields(cls)}
+        # GatewayRunner adds these transport/session flags before validating
+        # every adapter. They are not Router business settings.
+        values = {key: value for key, value in raw.items() if key not in FRAMEWORK_EXTRA_KEYS}
+        unknown = set(values) - {f.name for f in fields(cls)}
         if unknown:
             raise ValueError(f"unknown settings: {', '.join(sorted(unknown))}")
-        values = dict(raw)
         for key in ("owner_ids", "interests", "sources"):
             if key in values:
                 if not isinstance(values[key], (list, tuple)) or any(

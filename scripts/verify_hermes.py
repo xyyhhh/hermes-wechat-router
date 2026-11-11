@@ -113,9 +113,12 @@ def verify_dashboard(plugin, home):
 
 
 async def exercise(home, wrapper):
+    from types import SimpleNamespace
     from aiohttp import ClientSession, web
     from aiohttp.test_utils import TestServer
     from gateway.config import PlatformConfig
+    from gateway.config import Platform
+    from gateway.run import GatewayRunner
     from wechat_router.adapter import WechatRouterAdapter
     from wechat_router.http import PREFIX, signature
     from wechat_router.jev import JevClient
@@ -150,7 +153,9 @@ async def exercise(home, wrapper):
         config.extra.update(provider="custom", provider_base_url=str(server.make_url("/v1")),
                             jev_instructions="集成测试自定义判断规则")
         with patch.object(JevClient, "ENDPOINT", str(server.make_url("/v1/systemone"))):
-            adapter = WechatRouterAdapter(config)
+            runner = SimpleNamespace(config=SimpleNamespace(group_sessions_per_user=True, thread_sessions_per_user=False))
+            adapter = GatewayRunner._instantiate_adapter(runner, Platform('wechat_router'), config)
+            assert adapter is not None
             try:
                 assert await adapter.connect()
                 base = f"http://127.0.0.1:{port}"
@@ -198,7 +203,8 @@ async def exercise(home, wrapper):
                       os.environ["WECHAT_ROUTER_SECRET"] if name == "WECHAT_ROUTER_SECRET" else ""), \
          patch.object(adapter_module, "JevClient", side_effect=AssertionError("Unexpected model client")), \
          patch.object(adapter_module, "KanbanClient", side_effect=AssertionError("Unexpected dispatcher")):
-        receiver = WechatRouterAdapter(receive_config)
+        receiver = GatewayRunner._instantiate_adapter(runner, Platform('wechat_router'), receive_config)
+        assert receiver is not None
         try:
             assert await receiver.connect()
             assert receiver._worker is None and receiver._session is None
