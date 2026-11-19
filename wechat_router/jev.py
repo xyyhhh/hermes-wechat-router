@@ -1,4 +1,4 @@
-"""Native TypeSafe System One protocol; no chat/completions or auxiliary LLM."""
+"""Native TypeSafe System One and Google Decisions; no generative model calls."""
 
 import json
 import math
@@ -6,7 +6,7 @@ import math
 from dataclasses import asdict
 
 from .config import (DEFAULT_CHOICE_CRITERIA, DEFAULT_EVENT_QUESTION, DEFAULT_JEV_INSTRUCTIONS,
-                     DEFAULT_NEGATIVE_CRITERIA, DEFAULT_POSITIVE_CRITERIA, TYPESAFE_ENDPOINT)
+                     DEFAULT_NEGATIVE_CRITERIA, DEFAULT_POSITIVE_CRITERIA, GOOGLE_ENDPOINT, TYPESAFE_ENDPOINT)
 
 
 class JevError(RuntimeError):
@@ -34,7 +34,9 @@ def build_request(snapshot):
         })
     else:
         question.update(type="choice", criteria=snapshot.get("choice_criteria", DEFAULT_CHOICE_CRITERIA))
-    return {"model": snapshot["model"], "state": state, "questions": {"needs_followup": question}}
+    content = ({"input": json.dumps(state, ensure_ascii=False)} if snapshot.get("provider") == "google"
+               else {"state": state})
+    return {"model": snapshot["model"], **content, "questions": {"needs_followup": question}}
 
 
 def preview_request(settings):
@@ -70,9 +72,14 @@ def validate_response(response, request):
 class JevClient:
     ENDPOINT = TYPESAFE_ENDPOINT
 
-    def __init__(self, session, api_key, timeout=15, *, endpoint=None):
+    GOOGLE_ENDPOINT = GOOGLE_ENDPOINT
+
+    def __init__(self, session, api_key, timeout=15, *, endpoint=None, provider="typesafe"):
+        if provider not in ("typesafe", "custom", "google"):
+            raise ValueError("unsupported provider")
         self.session, self.api_key, self.timeout = session, api_key, timeout
-        self.endpoint = endpoint or self.ENDPOINT
+        self.provider = provider
+        self.endpoint = endpoint or (self.GOOGLE_ENDPOINT if provider == "google" else self.ENDPOINT)
 
     async def evaluate(self, request):
         import asyncio
@@ -80,7 +87,8 @@ class JevClient:
         try:
             async with self.session.post(
                 self.endpoint, json=request,
-                headers={"Authorization": f"Bearer {self.api_key}"},
+                headers=({"x-goog-api-key": self.api_key} if self.provider == "google"
+                         else {"Authorization": f"Bearer {self.api_key}"}),
                 timeout=aiohttp.ClientTimeout(total=self.timeout), allow_redirects=False,
             ) as response:
                 if response.status != 200:
@@ -96,6 +104,13 @@ class JevClient:
                     raise JevError("jev_invalid_json") from None
                 if not isinstance(value, dict):
                     raise JevError("jev_invalid_response")
+                if self.provider == "google":
+                    # Google Decisions uses the Interactions usage schema and returns no model field.
+                    usage = value.get("usage")
+                    value = {**value, "model": request["model"], "usage": {
+                        "input_tokens": usage.get("total_input_tokens"),
+                        "output_tokens": usage.get("total_output_tokens"),
+                    } if isinstance(usage, dict) else {}}
                 return value
         except (asyncio.TimeoutError, aiohttp.ClientError):
             raise JevError("jev_transport_error") from None

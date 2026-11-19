@@ -1,6 +1,6 @@
 """Web Dashboard API. Hermes supplies authentication and the current profile scope.
 
-No model calls, network requests, gateway restarts or direct Kanban writes here.
+Only the explicit test-connection endpoint calls a model, with synthetic data.
 Synchronous endpoints run in FastAPI's worker pool, retaining profile context.
 """
 
@@ -11,9 +11,9 @@ from zoneinfo import ZoneInfoNotFoundError
 from fastapi import APIRouter, Body, HTTPException
 
 from . import __version__
-from .config import Settings, data_path
+from .config import GOOGLE_MODEL, Settings, data_path
 from .store import Store
-from .jev import preview_request
+from .jev import JevClient, JevError, build_request, preview_request, validate_response
 
 router = APIRouter()
 EDITABLE = frozenset({
@@ -51,7 +51,7 @@ def _validated(extra):
 def get_config():
     from gateway.platforms._shared import get_scoped_secret
     platform = _platform()
-    defaults = asdict(Settings())
+    defaults = asdict(Settings(model=GOOGLE_MODEL) if platform.get("extra", {}).get("provider") == "google" else Settings())
     # Only return known non-secret fields, even if the YAML contains unrelated keys.
     extra = {**defaults, **{k: v for k, v in platform.get("extra", {}).items() if k in defaults}}
     error = None
@@ -65,7 +65,7 @@ def get_config():
         "settings": {k: v for k, v in extra.items() if k in EDITABLE},
         "profile": home.name if home.parent.name == "profiles" else "default",
         "validation_error": error,
-        "secrets": {k: bool(get_scoped_secret(k)) for k in ("WECHAT_ROUTER_SECRET", "TYPESAFE_API_KEY", "WECHAT_ROUTER_API_KEY")},
+        "secrets": {k: bool(get_scoped_secret(k)) for k in ("WECHAT_ROUTER_SECRET", "TYPESAFE_API_KEY", "WECHAT_ROUTER_API_KEY", "GEMINI_API_KEY")},
         "defaults": {k: v for k, v in defaults.items() if k in {
             "jev_instructions", "decision_mode", "decision_question", "bool_threshold",
             "positive_criteria", "negative_criteria", "choice_criteria", "min_confidence"}},
@@ -92,7 +92,43 @@ def request_preview(body: dict[str, Any] = Body(...)):
     if set(body) != {"settings"} or not isinstance(body["settings"], dict) or set(body["settings"]) - EDITABLE:
         raise HTTPException(422, "Expected editable settings")
     settings = _validated({**_platform().get("extra", {}), **body["settings"]})
-    return {"request": preview_request(settings), "calls_model": False, "reads_messages": False}
+    return {"request": preview_request(settings), "endpoint": settings.provider_endpoint,
+            "calls_model": False, "reads_messages": False}
+
+
+@router.post("/test-connection")
+async def test_connection(body: dict[str, Any] = Body(...)):
+    if body:
+        raise HTTPException(422, "Expected an empty object; test uses saved configuration")
+    from aiohttp import ClientSession
+    from gateway.platforms._shared import get_scoped_secret
+    settings = _validated(_platform().get("extra", {}))
+    key = get_scoped_secret(settings.provider_key_name)
+    if not key:
+        raise HTTPException(409, "请先保存所选 provider 的模型密钥。")
+    snapshot = asdict(settings)
+    # No owner IDs, policy, interests or real messages from the user's config leave this endpoint.
+    snapshot.update(owner_name="测试本人", owner_ids=["synthetic-owner"], interests=[], context=[], candidates=[],
+                    jev_instructions="只判断合成消息中是否有明确要求测试本人参与的预约。",
+                    messages=[{"text": "@测试本人 已确认：2030年1月2日下午三点参加项目评审会。",
+                               "sender_id": "synthetic-colleague", "mentions": ["synthetic-owner"],
+                               "occurred_at": "2030-01-01T10:00:00+08:00", "chat_type": "group"}])
+    request = build_request(snapshot)
+    try:
+        async with ClientSession(trust_env=False) as session:
+            client = JevClient(session, key, settings.request_timeout, provider=settings.provider,
+                               endpoint=settings.provider_endpoint if settings.provider == "custom" else None)
+            result = await client.evaluate(request)
+            validated = validate_response(result, request)
+    except JevError as exc:
+        # Do not echo provider error bodies, authentication headers or arbitrary input.
+        raise HTTPException(502, exc.code) from None
+    usage = validated["usage"]
+    return {"ok": True, "provider": settings.provider, "model": settings.model,
+            "answer": validated["answers"]["needs_followup"],
+            "usage": {name: usage[name] for name in ("input_tokens", "output_tokens")
+                      if isinstance(usage, dict) and type(usage.get(name)) is int and usage[name] >= 0},
+            "synthetic_only": True, "requests": 1, "tasks_created": 0}
 
 
 def _store():

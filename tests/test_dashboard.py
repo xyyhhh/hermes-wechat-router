@@ -13,6 +13,47 @@ from wechat_router.config import data_path
 from wechat_router.store import Store
 
 
+def test_google_preview_and_synthetic_connection_test(ui, monkeypatch):
+    client, config, writes, home = ui
+    extra = config["platforms"]["wechat_router"]["extra"]
+    extra.update(provider="google", owner_ids=["private-owner-id"], jev_instructions="private-personal-policy")
+    result = client.get("/api/plugins/wechat-router/config").json()
+    assert result["settings"]["model"] == "gemini-decision-1"
+    assert result["secrets"]["GEMINI_API_KEY"] is True
+    preview = client.post("/api/plugins/wechat-router/request-preview", json={"settings": {}}).json()
+    assert "input" in preview["request"] and "state" not in preview["request"]
+    assert preview["endpoint"].endswith("/v1beta/decisions")
+    selected_keys = []
+    monkeypatch.setattr(sys.modules["gateway.platforms._shared"], "get_scoped_secret",
+                        lambda key: selected_keys.append(key) or "synthetic-key")
+    async def evaluate(self, request):
+        assert self.provider == "google" and self.endpoint.endswith("/v1beta/decisions")
+        assert "synthetic-owner" in request["input"]
+        assert "private-owner-id" not in request["input"] and "private-personal-policy" not in request["input"]
+        return {"answers": {"needs_followup": {"type": "noul", "noul": .99}},
+                "usage": {"input_tokens": 100, "output_tokens": 0}}
+    monkeypatch.setattr(dashboard.JevClient, "evaluate", evaluate)
+    result = client.post("/api/plugins/wechat-router/test-connection", json={})
+    assert result.status_code == 200 and result.json()["synthetic_only"] is True
+    assert result.json()["usage"]["input_tokens"] == 100
+    assert selected_keys == ["GEMINI_API_KEY"]
+    assert not writes and not data_path(home).exists()
+
+
+def test_connection_test_requires_saved_secret_and_sanitizes_failures(ui, monkeypatch):
+    client, config, _, _ = ui
+    shared = sys.modules["gateway.platforms._shared"]
+    monkeypatch.setattr(shared, "get_scoped_secret", lambda key: "")
+    assert client.post("/api/plugins/wechat-router/test-connection", json={}).status_code == 409
+    assert client.post("/api/plugins/wechat-router/test-connection", json={"settings": {}}).status_code == 422
+    monkeypatch.setattr(shared, "get_scoped_secret", lambda key: "synthetic-key")
+    async def evaluate(self, request):
+        raise dashboard.JevError("jev_http_429")
+    monkeypatch.setattr(dashboard.JevClient, "evaluate", evaluate)
+    result = client.post("/api/plugins/wechat-router/test-connection", json={})
+    assert result.status_code == 502 and result.json()["detail"] == "jev_http_429"
+
+
 @pytest.fixture
 def ui(tmp_path, monkeypatch):
     config = {"model": {"default": "keep-me"}, "platforms": {"wechat_router": {

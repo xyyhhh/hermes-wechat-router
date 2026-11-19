@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+
+- Add Google Gemini Decisions native API: fixed /v1beta/decisions, JSON input text, x-goog-api-key and GEMINI_API_KEY.
+- Support Google Noul/Choice requests, strict answer validation and normalized token usage.
+- Add Google provider/model/secret controls and native request preview to Dashboard.
+- Add an explicit saved-connection test using synthetic data without inbox reads or Kanban writes.
+- Retain single-question batches, main-assistant handoffs, receive-only mode and provider-fenced retries.
+- Verify both Google modes through local HTTP fixtures and real Hermes adapter/Kanban integration.
+
 ## 0.4.0
 
 - Ask one event-detection question per merged batch; hand all actionable events to one main assistant.

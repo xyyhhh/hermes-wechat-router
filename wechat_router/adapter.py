@@ -45,7 +45,8 @@ class WechatRouterAdapter(BasePlatformAdapter):
                 self._session = ClientSession(trust_env=False)
                 kanban = KanbanClient(cfg, self.home)
                 client = JevClient(self._session, api_key, cfg.request_timeout,
-                                   endpoint=cfg.provider_endpoint if cfg.provider == "custom" else None)
+                                   endpoint=cfg.provider_endpoint if cfg.provider == "custom" else None,
+                                   provider=cfg.provider)
                 engine = Engine(store, cfg, client, kanban)
             self._runner = web.AppRunner(app, access_log=None)
             await self._runner.setup()

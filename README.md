@@ -1,8 +1,8 @@
 # Hermes WeChat Router
 
-把外部监听器提交的微信消息合并成批次，用 **Jev** 判断与账号本人有关的预约、期限、待办和重要事件，再通过 **Hermes 原生 Kanban** 统一交给主助理；由主助理分类、拆分、关联已有任务并委派专业 agent。
+把外部监听器提交的微信消息合并成批次，用 **Google Gemini Decisions 或 Jev** 判断与账号本人有关的预约、期限、待办和重要事件，再通过 **Hermes 原生 Kanban** 统一交给主助理；由主助理分类、拆分、关联已有任务并委派专业 agent。
 
-私聊和群聊都接收。插件内部只调用所配置 provider 的 TypeSafe System One 兼容 API；不调用聊天模型、不生成 LLM 摘要。后续 Kanban Agent 使用其 profile 的模型，属于另一次任务执行。
+私聊和群聊都接收。插件内部只调用所配置 provider 的 Google Decisions 或 TypeSafe System One 兼容 API；不调用聊天模型、不生成 LLM 摘要。后续 Kanban Agent 使用其 profile 的模型，属于另一次任务执行。
 
 修改外部消息监听器时，请直接参考 **[消息提供程序接入说明](docs/provider-api.md)**，包含字段映射、签名、投递确认和重试约定。
 
@@ -13,7 +13,7 @@ flowchart TD
     A[外部监听器逐条提交消息] --> B[签名校验、去重、持久化]
     B --> C[按来源与聊天合并]
     C --> D[近期对话、待观察线索、相关事务]
-    D --> E[一次 Jev 请求，一个批次事件问题]
+    D --> E[一次判别请求，一个批次事件问题]
     E --> F{处理结果}
     F -->|忽略| G[记录结果]
     F -->|观察 Choice 模式| H[保存线索，等待新消息]
@@ -43,6 +43,7 @@ hermes plugins install xyyhhh/hermes-wechat-router --enable
 | 名称 | 用途 |
 |---|---|
 | `WECHAT_ROUTER_SECRET` | 与外部监听器共享的 HMAC 密钥，至少 32 字节 |
+| `GEMINI_API_KEY` | 选择 Google Gemini Decisions 时使用，默认模型 `gemini-decision-1` |
 | `TYPESAFE_API_KEY` | 选择 TypeSafe 官方服务时使用 |
 | `WECHAT_ROUTER_API_KEY` | 选择第三方 System One 兼容服务时使用，与官方 key 独立 |
 
@@ -65,16 +66,17 @@ hermes plugins update wechat-router
 - 启用平台、观察/执行模式、本人 ID、关注事项、来源筛选和时区。
 - Jev 模型、消息合并窗口、每批上限、上下文上限和置信度阈值。
 - 0.3.0 起支持第三方 System One provider 的 API 地址、独立凭据和请求超时，以及自定义 Jev 判断提示词和恢复默认规则。
+- 0.5.0 起支持 Google Gemini Decisions 原生 API、独立 `GEMINI_API_KEY`、Google 请求预览，以及已保存连接的合成样例测试。
 - 0.4.0 起支持判断模式、判断问题、是/否说明、Choice 选项说明、阈值和请求 JSON 预览。
 - Kanban 看板与唯一的主助理 profile。
 - 监听地址/端口，以及单独保存两个凭据。已有密钥只显示是否配置，不回显。
 - 消息数量、插件内部 Jev 调用/token 统计、暂停/恢复、失败批次重试。
 
-**保存配置或凭据后，重启当前 profile 的 Gateway 生效。** 页面不会自动重启服务；暂停/恢复立即写入收件箱，进行中的批次可能继续完成。重试可能产生新的 Jev 调用。页面展示的处理开关不是 Gateway 在线探测，token 数据不包含下游 agent。
+**保存配置或凭据后，重启当前 profile 的 Gateway 生效。** 页面不会自动重启服务；暂停/恢复立即写入收件箱，进行中的批次可能继续完成。重试可能产生新的 Jev 调用。页面展示的处理开关不是 Gateway 在线探测，token 数据不包含连接测试和下游 agent。
 
 配置 API 使用 Dashboard 的认证与 profile 隔离；消息监听器仍使用原来的 HMAC 接入端口，两者独立。只打开页面、刷新统计或保存配置均不会调用模型。页面未覆盖的高级参数继续在 YAML 中维护，保存页面配置会保留这些参数。
 
-第三方服务和自定义提示词的配置示例、接口要求与重试规则见 [模型 Provider 与提示词](docs/model-provider.md)。仅支持 TypeSafe System One 协议，不把 OpenAI Chat Completions 接口当作兼容接口使用。
+第三方服务和自定义提示词的配置示例、接口要求与重试规则见 [模型 Provider 与提示词](docs/model-provider.md)。原生支持 Google Decisions 和 TypeSafe System One 两种协议，不把 OpenAI Chat Completions 当作兼容接口。Google 的配置步骤见该文档的 Google 小节。
 
 ### YAML 配置
 
@@ -210,7 +212,7 @@ hermes wechat-router retry <batch_id>
 
 ## 模型与 token
 
-插件只调用配置的 Jev 模型，默认 `jev-latest`；经 Magpie 等网关时需填写其实际开放的完整模型 ID（可能包含 provider 前缀）。每批一个请求、一个 Noul 或 Choice 问题，无另一个通用 LLM。实际开销取决于正文、上下文、候选事务和问题数量；使用 `status` 中的 `calls`、`input_tokens`、`output_tokens` 观察，不用字符数冒充实际 token 数。HTTP 故障时未拿到 usage 的请求无法从本地精确核算；Jev 真实调用与后续 Agent 都可能产生各自费用。
+插件只调用所选判别模型：Google 为 `gemini-decision-1`，TypeSafe 默认 `jev-latest`；经 Magpie 等网关时需填写其实际开放的完整模型 ID（可能包含 provider 前缀）。每批一个请求、一个 Noul 或 Choice 问题，无另一个通用 LLM。实际开销取决于正文、上下文、候选事务和问题数量；使用 `status` 中的 `calls`、`input_tokens`、`output_tokens` 观察，不用字符数冒充实际 token 数。HTTP 故障时未拿到 usage 的请求无法从本地精确核算；Jev 真实调用与后续 Agent 都可能产生各自费用。
 
 ## 开发与验证
 
@@ -221,6 +223,8 @@ python3 -m venv .venv
 npm ci
 npm test
 .venv/bin/python scripts/verify_hermes.py --hermes-source <official-hermes-checkout>
+.venv/bin/python scripts/verify_hermes.py --hermes-source <official-hermes-checkout> --provider google --decision-mode bool
+.venv/bin/python scripts/verify_hermes.py --hermes-source <official-hermes-checkout> --provider google --decision-mode choice
 ```
 
 单元/HTTP 测试使用合成消息与本机 Jev fixture。前端测试通过 React 和 jsdom 验证页面渲染、配置/凭据保存、暂停/恢复和重试；npm 依赖只用于开发测试。端到端脚本通过真实 Hermes Plugin Doctor、Dashboard 页面发现/后端加载/配置持久化、平台适配器启停和真实 Kanban CLI/数据库验证整条链路，但不调用真实 Jev、不访问真实微信，也不启动下游 Agent。这验证协议和恢复行为，不能替代实际消息上的分类质量评估。

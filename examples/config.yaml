@@ -9,15 +9,16 @@ platforms:
     extra:
       host: 127.0.0.1
       port: 8768
-      mode: observe # observe calls Jev, but creates no Kanban tasks; change to active when ready
+      receive_only: true # only receive until a key is configured and processing is explicitly resumed
+      mode: observe # observe calls the selected decision model, but creates no Kanban tasks; change to active when ready
       owner_name: 我
       owner_ids: [YOUR_WECHAT_ID]
       sources: [wechat-listener]
       timezone: Asia/Shanghai
       quiet_seconds: 8
       max_wait_seconds: 60
-      model: jev-latest
-      provider: typesafe # custom for a third-party TypeSafe System One compatible service
+      model: jev-latest # for provider: google, use gemini-decision-1 and GEMINI_API_KEY
+      provider: typesafe # google -> Gemini Decisions; custom -> System One compatible service
       provider_base_url: "" # e.g. https://provider.example/v1; uses WECHAT_ROUTER_API_KEY
       # jev_instructions: | # optional; omit to use the built-in policy
       #   Focus on appointments, deadlines and important events relevant to the owner.

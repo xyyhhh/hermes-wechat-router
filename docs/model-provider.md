@@ -1,4 +1,4 @@
-# 模型 Provider 与 Jev 判断提示词
+# 模型 Provider 与判断提示词
 
 插件 0.3.0 起，打开 Dashboard → 选择运行接收平台的 profile（本项目为 `default`）→ **微信消息分流**，即可配置 provider 与提示词。
 
@@ -6,6 +6,7 @@
 
 | 选项 | 请求地址 | 使用的凭据 |
 |---|---|---|
+| Google Gemini Decisions（0.5.0 起） | 固定为 `https://generativelanguage.googleapis.com/v1beta/decisions` | `GEMINI_API_KEY` |
 | TypeSafe 官方 | 固定为 `https://api.typesafe.ai/v1/systemone` | `TYPESAFE_API_KEY` |
 | 第三方 · System One 兼容 | 页面填写的 API 地址 | `WECHAT_ROUTER_API_KEY` |
 
@@ -13,15 +14,43 @@
 
 在页面下方的「凭据」区域，保存所选 provider 的 API key。凭据通过 Hermes 的 profile secret 接口保存，已有值不回显，也不放在配置 YAML、批次快照或 URL 中。切换为第三方时不会复用官方 key，也没有失败后自动回退到官方的行为。
 
-远程服务必须使用 HTTPS；本机 `localhost` 或回环 IP 的代理允许 HTTP。URL 不接受用户名、密码、query 或 fragment；API key 使用 `Authorization: Bearer ...`。HTTP 重定向不会被跟随。请求超时可以在页面调整。
+远程服务必须使用 HTTPS；本机 `localhost` 或回环 IP 的代理允许 HTTP。URL 不接受用户名、密码、query 或 fragment；TypeSafe/第三方 API key 使用 `Authorization: Bearer ...`；Google 使用 `x-goog-api-key`。HTTP 重定向不会被跟随。请求超时可以在页面调整。
 
 兼容意味着服务接受原生 `model`、`state`、`questions` 请求，并返回与问题同名的 `answers`：Noul 返回 `type: noul` 和 0–1 数值 `noul`；Choice 返回 `type: choice`、合法的 `choice` 和 0–1 数值 `confidence`。返回 `usage.input_tokens` 与 `usage.output_tokens` 时纳入统计；没有 usage 的调用无法精确计量。仅仅支持 OpenAI Chat Completions 的服务不满足这个协议。
 
 接口依据：[TypeSafe System One](https://docs.typesafe.ai/api/system-one)、[Noul](https://docs.typesafe.ai/primitives/noul)、[Choice](https://docs.typesafe.ai/primitives/choice)。
 
+## Google Gemini Decisions（0.5.0 起）
+
+在 Dashboard 中选择 **Google Gemini Decisions**，模型默认填入 `gemini-decision-1`，在凭据区保存 Google AI Studio 创建的 `GEMINI_API_KEY`，然后保存配置。Google 使用固定的官方地址，不填写第三方 API 地址，也不会使用 TypeSafe 或第三方的密钥。此处接入的是 Gemini Developer API 的 Decisions 接口，不是 Vertex AI 或普通聊天生成接口。
+
+两种判断模式都可使用：bool 对应原生 Noul（保留 true/false 说明），choice 保留 ignore/watch/act。请求以 `model`、`input`、`questions` 发送；`input` 是包含规则、账号、消息、历史与线索的 JSON 字符串。响应按问题 ID 校验，缺失、被过滤或无效的答案会失败，不会默认派单。Google 的 `usage.total_input_tokens` / `total_output_tokens` 转换为插件统计字段；缺少用量时保持未知，不冒充零消耗。
+
+先保存配置和凭据，再点击 **测试已保存的连接**。每次点击对已保存 provider 发出一个真实请求，可能计费；使用固定的合成预约、测试身份和测试总体规则，不读取真实微信消息、不创建任务、不更改处理开关。问题和选项采用已保存配置；返回判断及本次用量。连接测试不计入收件箱调用统计。成功表示协议和认证可用，不能替代中文群聊判断质量评估；切换模型后需重新校验阈值。
+
+只查看页面、保存配置和预览请求不调用模型。连接测试无须启动 Gateway，正常消息处理在保存后重启 Gateway 生效。可以保持 `receive_only: true` 完成配置和连接测试，之后再明确解除仅接收并恢复处理。
+
+```yaml
+platforms:
+  wechat_router:
+    enabled: true
+    extra:
+      provider: google
+      model: gemini-decision-1
+      receive_only: true
+      mode: observe
+      assistant_profile: assistant
+      decision_mode: bool
+      bool_threshold: 0.6
+```
+
+密钥通过 Hermes 凭据页面保存，不写入上述 YAML。现有自定义提示词、合并规则和主助理交接行为仍然适用。
+
+接口依据：[Google 官方判别模型教程](https://codelabs.developers.google.com/codelabs/discriminative-models)、[Google Gen AI SDK Noul 定义](https://github.com/googleapis/python-genai/blob/main/google/genai/_gaos/types/decisions/noulquestion.py)、[响应结构](https://github.com/googleapis/python-genai/blob/main/google/genai/_gaos/types/decisions/createdecisionresponse.py)。实现直接使用已有 aiohttp，无需额外 SDK 依赖。
+
 ## 自定义提示词
 
-「Jev 判断提示词」中的总体规则作为 `state.routing_policy` 发送给模型，替换内置规则。整批消息的判断问题引用这份规则；账号 ID、关注事项、消息、历史上下文和候选事务仍通过单独字段传入。它独立于 calendar/assistant 等下游 agent 的 SOUL 和聊天模型提示词。
+「判别模型提示词」中的总体规则作为 `state.routing_policy`（Google 为 `input` JSON 中的 `routing_policy`）发送给模型，替换内置规则。整批消息的判断问题引用这份规则；账号 ID、关注事项、消息、历史上下文和候选事务仍通过单独字段传入。它独立于 calendar/assistant 等下游 agent 的 SOUL 和聊天模型提示词。
 
 可调整的内容包括：哪些群通知与本人相关、预约怎样才值得跟进、哪些事项只观察、哪些日常消息需要忽略。例如：
 
@@ -37,7 +66,7 @@
 
 ## 判断问题与模式（0.4.0 起）
 
-「Jev 请求配置」控制实际发出的唯一问题，问题 ID 固定为 `needs_followup`。运行时使用合并后的整个消息批次和相关上下文。
+「模型请求配置」控制实际发出的唯一问题，问题 ID 固定为 `needs_followup`。运行时使用合并后的整个消息批次和相关上下文。
 
 | 页面模式 | 原生协议 | 页面可配置内容 | 处理 |
 |---|---|---|---|
@@ -65,7 +94,7 @@ Noul 返回的是“是”的概率，不是 JSON 的 true/false，也没有独�
 }
 ```
 
-协议依据：[Noul](https://docs.typesafe.ai/primitives/noul)、[Noul](https://docs.typesafe.ai/primitives/noul)、[Choice](https://docs.typesafe.ai/primitives/choice)。
+协议依据：[Noul](https://docs.typesafe.ai/primitives/noul)、[Choice](https://docs.typesafe.ai/primitives/choice)。
 
 ## 生效与重试
 

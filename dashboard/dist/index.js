@@ -12,9 +12,10 @@
     const [error, setError] = React.useState("");
     const [notice, setNotice] = React.useState("");
     const [busy, setBusy] = React.useState(false);
-    const [keys, setKeys] = React.useState({ WECHAT_ROUTER_SECRET: "", TYPESAFE_API_KEY: "", WECHAT_ROUTER_API_KEY: "" });
+    const [keys, setKeys] = React.useState({ WECHAT_ROUTER_SECRET: "", TYPESAFE_API_KEY: "", WECHAT_ROUTER_API_KEY: "", GEMINI_API_KEY: "" });
     const [statusError, setStatusError] = React.useState("");
     const [preview, setPreview] = React.useState(null);
+    const [connectionTest, setConnectionTest] = React.useState(null);
     const profile = config && config.profile;
     const scoped = (path) => path + (profile ? "?profile=" + encodeURIComponent(profile) : "");
     const request = (path, method, body) => SDK.fetchJSON(scoped(base + path), {
@@ -42,11 +43,11 @@
     async function act(action) {
       setBusy(true); setError(""); setNotice("");
       try { await action(); }
-      catch (_) { setError("操作失败。请检查 provider 地址、提示词、本人 ID、时区和 profile 名称，然后重试。"); }
+      catch (_) { setError("操作失败。请检查密钥、模型 ID、provider 地址、提示词、本人 ID、时区和 profile 名称，然后重试。"); }
       finally { setBusy(false); }
     }
     function change(name, value) {
-      setPreview(null);
+      setPreview(null); setConnectionTest(null);
       setConfig(old => ({ ...old, settings: { ...old.settings, [name]: value } }));
     }
     function textField(name, label, hint, value, onChange) {
@@ -83,12 +84,13 @@
       h("p", { role: error ? "alert" : "status" }, error || "正在读取配置…"));
     const s = config.settings;
     const usage = stats && stats.usage || {};
+    const modelKey = s.provider === "google" ? "GEMINI_API_KEY" : s.provider === "custom" ? "WECHAT_ROUTER_API_KEY" : "TYPESAFE_API_KEY";
     const metric = (label, value) => h("div", { className: "wr-metric", key: label },
       h("strong", null, Number(value || 0).toLocaleString()), h("span", null, label));
 
     return h("main", { className: "wr-page" },
       h("header", { className: "wr-header" }, h("div", null, h("h1", null, "微信消息分流"),
-        h("p", null, "微信消息 → 按会话合并 → Jev 事件初筛 → 主助理处理和委派")),
+        h("p", null, "微信消息 → 按会话合并 → 判别模型事件初筛 → 主助理处理和委派")),
         h("span", { className: "wr-pill" }, "Profile: " + profile + " · v" + config.version)),
       error && h("p", { className: "wr-alert", role: "alert" }, error),
       notice && h("p", { className: "wr-notice", role: "status" }, notice),
@@ -98,9 +100,9 @@
           stats.paused ? "已暂停处理新批次；接收接口仍可保存消息。" : "处理开关已开启；此状态不代表 Gateway 当前在线。"),
         statusError && h("p", { role: "alert" }, statusError),
         h("div", { className: "wr-metrics" }, metric("已接收消息", stats && stats.messages),
-          metric("等待合并", stats && stats.buffered), metric("Jev 调用", usage.calls),
+          metric("等待合并", stats && stats.buffered), metric("模型调用", usage.calls),
           metric("输入 token", usage.input_tokens), metric("输出 token", usage.output_tokens)),
-        h("p", { className: "wr-muted" }, "仅统计插件内的 Jev 消耗，不包含下游 agent。缺少 usage 的调用：" + (usage.calls_without_usage || 0)),
+        h("p", { className: "wr-muted" }, "仅统计收件箱处理的模型消耗，不包含连接测试和下游 agent。缺少 usage 的调用：" + (usage.calls_without_usage || 0)),
         stats && stats.initialized && h("div", { className: "wr-actions" },
           button(stats.paused ? "恢复处理" : "暂停处理", () => act(async () => {
             await request("/pause", "POST", { paused: !stats.paused });
@@ -113,7 +115,7 @@
             button("重试", () => act(async () => {
               await request("/retry", "POST", { batch_id: item.id });
               setStats(await SDK.fetchJSON(scoped(base + "/status")));
-              setNotice("已重新排队；可能再次调用 Jev。");
+              setNotice("已重新排队；可能再次调用判别模型。");
             })))))),
       h("form", { onSubmit: event => { event.preventDefault(); act(async () => {
         await request("/config", "PUT", { enabled: config.enabled, settings: normalized() });
@@ -125,37 +127,48 @@
           h("div", { className: "wr-grid" },
             h("label", { className: "wr-field" }, h("span", null, "处理模式"),
               h("select", { name: "mode", value: s.mode, disabled: busy, onChange: e => change("mode", e.target.value) },
-                h("option", { value: "observe" }, "观察：调用 Jev，记录判断"), h("option", { value: "active" }, "执行：调用 Jev，并派发任务")),
-              h("small", null, "两种模式均产生 Jev 费用；观察模式不创建 Kanban 任务。")),
+                h("option", { value: "observe" }, "观察：调用判别模型，记录判断"), h("option", { value: "active" }, "执行：调用判别模型，并派发任务")),
+              h("small", null, "两种模式均产生 模型费用；观察模式不创建 Kanban 任务。")),
             h("label", { className: "wr-checkbox" }, h("input", { type: "checkbox", name: "receive_only", checked: !!s.receive_only,
-              disabled: busy, onChange: e => change("receive_only", e.target.checked) }), "仅接收并暂存，不调用 Jev、不派单（无需模型 key；保存后重启 Gateway）"),
+              disabled: busy, onChange: e => change("receive_only", e.target.checked) }), "仅接收并暂存，不调用判别模型、不派单（无需模型 key；保存后重启 Gateway）"),
             field("owner_name", "本人称呼"), field("timezone", "时区"),
             list("owner_ids", "本人的微信 ID", "每行一个；使用消息源实际发送的 sender_id。执行模式必填。"),
             list("interests", "关注事项", "每行一项，帮助判断群聊中与自己相关的信息。"),
             list("sources", "消息源筛选", "每行一个 source；留空接收全部来源。私聊和群聊均处理。"))),
-        h("section", { className: "wr-card" }, h("h2", null, "Jev Provider"),
+        h("section", { className: "wr-card" }, h("h2", null, "判别模型 Provider"),
           h("div", { className: "wr-grid" },
             h("label", { className: "wr-field" }, h("span", null, "服务提供商"),
-              h("select", { name: "provider", value: s.provider, disabled: busy, onChange: e => change("provider", e.target.value) },
+              h("select", { name: "provider", value: s.provider, disabled: busy, onChange: e => {
+                const next = e.target.value; setPreview(null); setConnectionTest(null);
+                setConfig(old => ({ ...old, settings: { ...old.settings, provider: next,
+                  model: next === "google" ? "gemini-decision-1" : old.settings.provider === "google" && old.settings.model === "gemini-decision-1" ? "jev-latest" : old.settings.model } }));
+              } },
+                h("option", { value: "google" }, "Google Gemini Decisions"),
                 h("option", { value: "typesafe" }, "TypeSafe 官方"),
                 h("option", { value: "custom" }, "第三方 · System One 兼容"))),
-            field("model", "模型 ID", "填写服务商实际提供的模型名称，例如 jev-latest。"),
+            field("model", "模型 ID", s.provider === "google" ? "Google 判别模型，默认 gemini-decision-1。" : "填写服务商实际提供的模型名称，例如 jev-latest。"),
             field("request_timeout", "请求超时（秒）", "按服务商的响应速度调整。", { type: "number", min: 0.1, step: 0.1 }),
             s.provider === "custom" && field("provider_base_url", "API 地址", "填写含版本路径的 Base URL（如 https://provider.example/v1），或完整 /systemone 地址。")),
-          h("p", { className: "wr-muted" }, s.provider === "custom"
+          h("p", { className: "wr-muted" }, s.provider === "google"
+            ? "使用 Google 官方 /v1beta/decisions 接口。请在下方保存 GEMINI_API_KEY，通过 x-goog-api-key 认证。" : s.provider === "custom"
             ? "请求使用 TypeSafe System One 格式和 Bearer 认证。请在下方保存 WECHAT_ROUTER_API_KEY；不会使用官方 key 或自动回退到官方服务。"
             : "使用 https://api.typesafe.ai/v1/systemone，请在下方保存 TYPESAFE_API_KEY。"),
-          h("p", { className: "wr-muted" }, "修改后保存配置并重启 Gateway。保存页面不会向服务商发出请求。")),
-        h("section", { className: "wr-card" }, h("h2", null, "Jev 判断提示词"),
+          h("p", { className: "wr-muted" }, "修改后保存配置并重启 Gateway。保存页面不会向服务商发出请求。"),
+          h("div", { className: "wr-actions" }, button("测试已保存的连接", () => act(async () => {
+            setConnectionTest(null);
+            setConnectionTest(await request("/test-connection", "POST", {}));
+          })), h("span", { className: "wr-muted" }, "先保存配置和密钥；点击后发送一条合成预约样例，调用已保存的模型并可能计费。无需启用消息处理，不读取微信消息，不创建任务。")),
+          connectionTest && h("p", { role: "status" }, "连接测试成功：" + connectionTest.model + "；合成样例判断：" + JSON.stringify(connectionTest.answer) + "；本次 token：" + JSON.stringify(connectionTest.usage))),
+        h("section", { className: "wr-card" }, h("h2", null, "判别模型提示词"),
           h("label", { className: "wr-field" }, h("span", null, "总体判断规则"),
             h("textarea", { name: "jev_instructions", rows: 7, maxLength: 12000, disabled: busy,
               value: s.jev_instructions, onChange: e => change("jev_instructions", e.target.value) }),
-            h("small", null, "作为 state.routing_policy 发送给 Jev，描述什么事件需要跟进。主助理负责具体分类、拆分、合并和委派。最多 12,000 字符；较长提示词会增加每批输入 token。")),
+            h("small", null, "作为 state.routing_policy 发送给判别模型，描述什么事件需要跟进。主助理负责具体分类、拆分、合并和委派。最多 12,000 字符；较长提示词会增加每批输入 token。")),
           h("div", { className: "wr-actions" },
             button("恢复默认提示词", () => change("jev_instructions", config.defaults.jev_instructions), !config.defaults),
             h("span", { className: "wr-muted" }, "恢复后需保存；已有批次保留原提示词。"))),
-        h("section", { className: "wr-card" }, h("h2", null, "Jev 请求配置"),
-          h("p", { className: "wr-muted" }, "每个合并批次只问一个问题。Jev 不选择 agent；命中事件统一交给下方主助理。"),
+        h("section", { className: "wr-card" }, h("h2", null, "模型请求配置"),
+          h("p", { className: "wr-muted" }, "每个合并批次只问一个问题。判别模型不选择 agent；命中事件统一交给下方主助理。"),
           h("label", { className: "wr-field" }, h("span", null, "判断模式"),
             h("select", { name: "decision_mode", value: s.decision_mode, disabled: busy,
               onChange: e => change("decision_mode", e.target.value) },
@@ -163,7 +176,7 @@
               h("option", { value: "choice" }, "选择 · 忽略 / 观察 / 交主助理（Choice）"))),
           textField("decision_question", "判断问题", "此文本是该批次唯一问题的 instructions。"),
           s.decision_mode === "bool" ? h("div", { className: "wr-grid" },
-            field("bool_threshold", "交接概率阈值", "Jev 返回是的概率；达到阈值就交主助理，否则忽略本批。", { type: "number", min: 0.01, max: 0.99, step: 0.01 }),
+            field("bool_threshold", "交接概率阈值", "模型返回是的概率；达到阈值就交主助理，否则忽略本批。", { type: "number", min: 0.01, max: 0.99, step: 0.01 }),
             textField("positive_criteria", "是：需要跟进", "作为 criteria.true。"),
             textField("negative_criteria", "否：无需跟进", "作为 criteria.false。")) :
             h("div", { className: "wr-grid" },
@@ -174,7 +187,7 @@
           h("div", { className: "wr-actions" }, button("预览请求 JSON", () => act(async () => {
             setPreview(await request("/request-preview", "POST", { settings: normalized() }));
           })), h("span", { className: "wr-muted" }, "使用表单草稿和消息占位符；不读取真实消息、不调用模型。")),
-          preview && h("pre", { className: "wr-preview", "aria-label": "Jev 请求 JSON" }, JSON.stringify(preview.request, null, 2))),
+          preview && h("pre", { className: "wr-preview", "aria-label": "模型请求 JSON" }, JSON.stringify(preview.request, null, 2))),
         h("section", { className: "wr-card" }, h("h2", null, "消息合并与判断"),
           h("div", { className: "wr-grid" },
             field("quiet_seconds", "静默合并窗口（秒）", "同一会话停止来信多久后开始判断。", { type: "number", min: 0.1, step: 0.1 }),
@@ -193,11 +206,11 @@
           h("span", null, "保存后重启 Gateway；不会自动重启。"))),
       h("section", { className: "wr-card" }, h("h2", null, "凭据"),
         h("p", { className: "wr-muted" }, "通过 Hermes 的凭据接口单独保存；已有值不回显。保存后重启 Gateway。"),
-        ...["WECHAT_ROUTER_SECRET", s.provider === "custom" ? "WECHAT_ROUTER_API_KEY" : "TYPESAFE_API_KEY"].map(name => h("div", { className: "wr-secret", key: name },
+        ...["WECHAT_ROUTER_SECRET", modelKey].map(name => h("div", { className: "wr-secret", key: name },
           h("label", { className: "wr-field" }, h("span", null, name + (config.secrets[name] ? " · 已配置" : " · 未配置")),
             h("input", { name, type: "password", autoComplete: "new-password", value: keys[name], disabled: busy,
               onChange: e => setKeys(old => ({ ...old, [name]: e.target.value })) }),
-            h("small", null, name === "WECHAT_ROUTER_SECRET" ? "与外部监听器共享，至少 32 字节。" : name === "TYPESAFE_API_KEY" ? "仅用于 TypeSafe 官方服务。" : "仅用于当前配置的第三方 System One 服务。")),
+            h("small", null, name === "WECHAT_ROUTER_SECRET" ? "与外部监听器共享，至少 32 字节。" : name === "GEMINI_API_KEY" ? "用于 Google Gemini Decisions；在 Google AI Studio 创建 API key。" : name === "TYPESAFE_API_KEY" ? "仅用于 TypeSafe 官方服务。" : "仅用于当前配置的第三方 System One 服务。")),
           button("保存凭据", () => act(async () => {
             try {
               await SDK.fetchJSON(scoped("/api/env"), { method: "PUT", headers: { "Content-Type": "application/json" },

@@ -23,6 +23,8 @@ DEFAULT_CHOICE_CRITERIA = {
     "act": DEFAULT_POSITIVE_CRITERIA,
 }
 TYPESAFE_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
+GOOGLE_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/decisions"
+GOOGLE_MODEL = "gemini-decision-1"
 FRAMEWORK_EXTRA_KEYS = frozenset({'group_sessions_per_user', 'thread_sessions_per_user'})
 
 
@@ -90,6 +92,8 @@ class Settings:
                 ):
                     raise ValueError(f"{key} must be a list of nonempty strings")
                 values[key] = tuple(values[key])
+        if values.get("provider") == "google" and "model" not in values:
+            values["model"] = GOOGLE_MODEL
         result = cls(**values)
         result.validate()
         return result
@@ -97,8 +101,8 @@ class Settings:
     def validate(self) -> None:
         if type(self.receive_only) is not bool:
             raise ValueError("receive_only must be a boolean")
-        if self.provider not in ("typesafe", "custom"):
-            raise ValueError("provider must be typesafe or custom")
+        if self.provider not in ("typesafe", "custom", "google"):
+            raise ValueError("provider must be typesafe, custom or google")
         if not isinstance(self.provider_base_url, str):
             raise ValueError("provider_base_url must be a string")
         if self.provider == "custom" or self.provider_base_url:
@@ -155,6 +159,8 @@ class Settings:
 
     @property
     def provider_endpoint(self) -> str:
+        if self.provider == "google":
+            return GOOGLE_ENDPOINT
         if self.provider == "typesafe":
             return TYPESAFE_ENDPOINT
         base = self.provider_base_url.rstrip("/")
@@ -162,6 +168,8 @@ class Settings:
 
     @property
     def provider_key_name(self) -> str:
+        if self.provider == "google":
+            return "GEMINI_API_KEY"
         return "TYPESAFE_API_KEY" if self.provider == "typesafe" else "WECHAT_ROUTER_API_KEY"
 
 

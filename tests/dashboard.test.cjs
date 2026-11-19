@@ -14,7 +14,7 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
   let paused = false;
   let failure = true;
   const config = {
-    profile: "work", version: "0.4.0", enabled: true, secrets: { TYPESAFE_API_KEY: true },
+    profile: "work", version: "0.5.0", enabled: true, secrets: { TYPESAFE_API_KEY: true },
     defaults: { jev_instructions: "默认判断规则" },
     settings: { mode: "observe", model: "jev-latest", provider: "typesafe", provider_base_url: "", jev_instructions: "默认判断规则", owner_name: "我", owner_ids: ["me"], interests: [], sources: [],
       timezone: "Asia/Shanghai", quiet_seconds: 8, max_wait_seconds: 60, max_batch_messages: 12, request_timeout: 15,
@@ -36,6 +36,7 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
     if (url.includes("/request-preview")) return { request: { model: body.settings.model,
       questions: { needs_followup: { type: body.settings.decision_mode === "bool" ? "noul" : "choice",
         instructions: body.settings.decision_question, criteria: body.settings.choice_criteria } } }, calls_model: false, reads_messages: false };
+    if (url.includes("/test-connection")) return { ok: true, model: "gemini-decision-1", answer: { noul: .99 }, usage: { input_tokens: 100, output_tokens: 0 } };
     return { ok: true };
   } };
   dom.window.eval(fs.readFileSync("dashboard/dist/index.js", "utf8"));
@@ -113,6 +114,25 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
     await click("保存凭据");
     assert.ok(requests.find(x => x.body && x.body.key === "WECHAT_ROUTER_API_KEY" && x.body.value === "synthetic-custom-key"));
     assert.equal(document.querySelector('[name="WECHAT_ROUTER_API_KEY"]').value, "");
+    await React.act(async () => {
+      const select = document.querySelector('[name="provider"]');
+      select.value = "google";
+      select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    assert.equal(document.querySelector('[name="model"]').value, "gemini-decision-1");
+    assert.ok(document.querySelector('[name="GEMINI_API_KEY"]'));
+    assert.equal(document.querySelector('[name="WECHAT_ROUTER_API_KEY"]'), null);
+    await input("GEMINI_API_KEY", "synthetic-google-key");
+    await click("保存凭据");
+    assert.ok(requests.find(x => x.body && x.body.key === "GEMINI_API_KEY" && x.body.value === "synthetic-google-key"));
+    assert.equal(document.querySelector('[name="GEMINI_API_KEY"]').value, "");
+    await React.act(async () => { document.querySelector("form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
+    const googleSaved = requests.filter(x => x.url.includes("/config?") && x.options.method === "PUT").at(-1);
+    assert.equal(googleSaved.body.settings.provider, "google");
+    assert.equal(googleSaved.body.settings.model, "gemini-decision-1");
+    await click("测试已保存的连接");
+    assert.ok(requests.find(x => x.url.includes("/test-connection?profile=work")));
+    assert.match(document.body.textContent, /连接测试成功/);
     await click("恢复默认提示词");
     assert.equal(document.querySelector('[name="jev_instructions"]').value, "默认判断规则");
     assert.ok(requests.every(x => !x.url.includes("jev") && !x.url.includes("typesafe")));

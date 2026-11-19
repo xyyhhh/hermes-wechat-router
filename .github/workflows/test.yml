@@ -46,3 +46,5 @@ jobs:
       - run: |
           python scripts/verify_hermes.py --hermes-source .hermes-reference --decision-mode bool
           python scripts/verify_hermes.py --hermes-source .hermes-reference --decision-mode choice
+          python scripts/verify_hermes.py --hermes-source .hermes-reference --provider google --decision-mode bool
+          python scripts/verify_hermes.py --hermes-source .hermes-reference --provider google --decision-mode choice

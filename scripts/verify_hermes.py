@@ -22,6 +22,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--hermes-source", required=True, type=Path)
     parser.add_argument("--decision-mode", choices=("bool", "choice"), default="bool")
+    parser.add_argument("--provider", choices=("custom", "google"), default="custom")
     args = parser.parse_args()
     source = args.hermes_source.resolve()
     plugin = Path(__file__).resolve().parents[1]
@@ -45,7 +46,8 @@ def main():
         wrapper.chmod(0o700)
         env = {"HERMES_HOME": str(home), "PYTHONPATH": os.pathsep.join((str(source), str(plugin))),
                "WECHAT_ROUTER_SECRET": "synthetic-fixture-secret-" * 3,
-               "TYPESAFE_API_KEY": "", "WECHAT_ROUTER_API_KEY": "synthetic-custom-fixture-key"}
+               "TYPESAFE_API_KEY": "", "WECHAT_ROUTER_API_KEY": "synthetic-custom-fixture-key",
+               "GEMINI_API_KEY": "synthetic-google-fixture-key"}
         with patch.dict(os.environ, env):
             from hermes_cli.plugin_dev import doctor_plugin
             report = doctor_plugin(plugin)
@@ -60,7 +62,7 @@ def main():
             register(PluginContext(manifest, manager))
             try:
                 verify_dashboard(plugin, home)
-                asyncio.run(exercise(home, wrapper, args.decision_mode))
+                asyncio.run(exercise(home, wrapper, args.decision_mode, args.provider))
             finally:
                 manager.unload()
 
@@ -118,7 +120,7 @@ def verify_dashboard(plugin, home):
     print("Dashboard discovery, real API mount and profile-scoped config persistence: passed")
 
 
-async def exercise(home, wrapper, decision_mode):
+async def exercise(home, wrapper, decision_mode, provider):
     from types import SimpleNamespace
     from aiohttp import ClientSession, web
     from aiohttp.test_utils import TestServer
@@ -134,9 +136,14 @@ async def exercise(home, wrapper, decision_mode):
 
     requests = []
     async def evaluate(request):
-        assert request.headers["Authorization"] == "Bearer synthetic-custom-fixture-key"
+        if provider == "google":
+            assert request.headers["x-goog-api-key"] == "synthetic-google-fixture-key"
+            assert "Authorization" not in request.headers
+        else:
+            assert request.headers["Authorization"] == "Bearer synthetic-custom-fixture-key"
         payload = await request.json()
-        assert payload["state"]["routing_policy"] == "集成测试自定义判断规则"
+        state = json.loads(payload["input"]) if provider == "google" else payload["state"]
+        assert state["routing_policy"] == "集成测试自定义判断规则"
         requests.append(payload)
         answers = {}
         assert set(payload["questions"]) == {"needs_followup"}
@@ -144,10 +151,12 @@ async def exercise(home, wrapper, decision_mode):
         assert question["instructions"] == "集成测试批次事件问题"
         answers["needs_followup"] = ({"type": "noul", "noul": .95} if decision_mode == "bool" else
                                       {"type": "choice", "choice": "act", "confidence": .95})
-        return web.json_response({"answers": answers, "model": "jev-synthetic-fixture",
-                                  "usage": {"input_tokens": 200, "output_tokens": 40}})
+        usage = ({"total_input_tokens": 200, "total_output_tokens": 0} if provider == "google"
+                 else {"input_tokens": 200, "output_tokens": 40})
+        return web.json_response({"answers": answers, "usage": usage})
     app = web.Application()
-    app.router.add_post("/v1/systemone", evaluate)
+    path = "/v1beta/decisions" if provider == "google" else "/v1/systemone"
+    app.router.add_post(path, evaluate)
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
@@ -157,9 +166,10 @@ async def exercise(home, wrapper, decision_mode):
         "decision_mode": decision_mode, "decision_question": "集成测试批次事件问题",
     })
     async with TestServer(app) as server, ClientSession(trust_env=False) as session:
-        config.extra.update(provider="custom", provider_base_url=str(server.make_url("/v1")),
+        config.extra.update(provider=provider, model="gemini-decision-1" if provider == "google" else "jev-latest",
+                            provider_base_url=str(server.make_url("/v1")),
                             jev_instructions="集成测试自定义判断规则")
-        with patch.object(JevClient, "ENDPOINT", str(server.make_url("/v1/systemone"))):
+        with patch.object(JevClient, "GOOGLE_ENDPOINT" if provider == "google" else "ENDPOINT", str(server.make_url(path))):
             runner = SimpleNamespace(config=SimpleNamespace(group_sessions_per_user=True, thread_sessions_per_user=False))
             adapter = GatewayRunner._instantiate_adapter(runner, Platform('wechat_router'), config)
             assert adapter is not None
@@ -190,14 +200,19 @@ async def exercise(home, wrapper, decision_mode):
                     await asyncio.sleep(.05)
                 assert outcome["status"] == "done", outcome
                 assert outcome["outcome"] == "task_created", outcome
-                assert len(requests) == 1 and len(requests[0]["state"]["messages"]) == 2
+                assert len(requests) == 1
+                state = json.loads(requests[0]["input"]) if provider == "google" else requests[0]["state"]
+                assert len(state["messages"]) == 2
+                usage = Store(data_path(home)).status()["usage"]
+                assert usage["input_tokens"] == 200 and usage["calls"] == 1
+                assert usage["output_tokens"] == (0 if provider == "google" else 40)
                 assert len(outcome["tasks"]) == 1
                 board = KanbanClient(adapter.settings, home)
                 task = await board.show(outcome["tasks"][0]["task_id"])
                 assert task["task"]["assignee"] == "assistant"
                 assert task["task"]["status"] == "ready"
                 assert "fixture-group" in task["task"]["body"]
-                print(f"HTTP ingress -> one {decision_mode} question -> main assistant via real Hermes Kanban: passed")
+                print(f"HTTP ingress -> {provider} one {decision_mode} question -> main assistant via real Hermes Kanban: passed")
             finally:
                 await adapter.disconnect()
             assert adapter._worker is None and adapter._runner is None and adapter._session is None
