@@ -13,6 +13,7 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
   const requests = [];
   let paused = false;
   let failure = true;
+  let connectionFails = true;
   const config = {
     profile: "work", version: "0.5.0", enabled: true, secrets: { TYPESAFE_API_KEY: true },
     defaults: { jev_instructions: "默认判断规则" },
@@ -36,6 +37,7 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
     if (url.includes("/request-preview")) return { request: { model: body.settings.model,
       questions: { needs_followup: { type: body.settings.decision_mode === "bool" ? "noul" : "choice",
         instructions: body.settings.decision_question, criteria: body.settings.choice_criteria } } }, calls_model: false, reads_messages: false };
+    if (url.includes("/test-connection") && connectionFails) throw new Error('502: {"detail":"jev_timeout"}');
     if (url.includes("/test-connection")) return { ok: true, model: "gemini-decision-1", answer: { noul: .99 }, usage: { input_tokens: 100, output_tokens: 0 } };
     return { ok: true };
   } };
@@ -132,6 +134,10 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
     assert.equal(googleSaved.body.settings.model, "gemini-decision-1");
     await click("测试已保存的连接");
     assert.ok(requests.find(x => x.url.includes("/test-connection?profile=work")));
+    assert.match(document.body.textContent, /模型请求超时/);
+    assert.match(document.body.textContent, /jev_timeout/);
+    connectionFails = false;
+    await click("测试已保存的连接");
     assert.match(document.body.textContent, /连接测试成功/);
     await click("恢复默认提示词");
     assert.equal(document.querySelector('[name="jev_instructions"]').value, "默认判断规则");

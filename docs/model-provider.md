@@ -24,7 +24,7 @@
 
 在 Dashboard 中选择 **Google Gemini Decisions**，模型默认填入 `gemini-decision-1`，在凭据区保存 Google AI Studio 创建的 `GEMINI_API_KEY`，然后保存配置。Google 使用固定的官方地址，不填写第三方 API 地址，也不会使用 TypeSafe 或第三方的密钥。此处接入的是 Gemini Developer API 的 Decisions 接口，不是 Vertex AI 或普通聊天生成接口。
 
-两种判断模式都可使用：bool 对应原生 Noul（保留 true/false 说明），choice 保留 ignore/watch/act。请求以 `model`、`input`、`questions` 发送；`input` 是包含规则、账号、消息、历史与线索的 JSON 字符串。响应按问题 ID 校验，缺失、被过滤或无效的答案会失败，不会默认派单。Google 的 `usage.total_input_tokens` / `total_output_tokens` 转换为插件统计字段；缺少用量时保持未知，不冒充零消耗。
+两种判断模式都可使用：bool 对应原生 Noul（Google 使用 `criteria.true_description` / `false_description`，TypeSafe 使用 `true` / `false`），choice 保留 ignore/watch/act。请求以 `model`、`input`、`questions` 发送；`input` 是包含规则、账号、消息、历史与线索的 JSON 字符串。响应按问题 ID 校验，缺失、被过滤或无效的答案会失败，不会默认派单。Google 的 `usage.total_input_tokens` / `total_output_tokens` 转换为插件统计字段；缺少用量时保持未知，不冒充零消耗。
 
 先保存配置和凭据，再点击 **测试已保存的连接**。每次点击对已保存 provider 发出一个真实请求，可能计费；使用固定的合成预约、测试身份和测试总体规则，不读取真实微信消息、不创建任务、不更改处理开关。问题和选项采用已保存配置；返回判断及本次用量。连接测试不计入收件箱调用统计。成功表示协议和认证可用，不能替代中文群聊判断质量评估；切换模型后需重新校验阈值。
 
@@ -46,7 +46,17 @@ platforms:
 
 密钥通过 Hermes 凭据页面保存，不写入上述 YAML。现有自定义提示词、合并规则和主助理交接行为仍然适用。
 
-接口依据：[Google 官方判别模型教程](https://codelabs.developers.google.com/codelabs/discriminative-models)、[Google Gen AI SDK Noul 定义](https://github.com/googleapis/python-genai/blob/main/google/genai/_gaos/types/decisions/noulquestion.py)、[响应结构](https://github.com/googleapis/python-genai/blob/main/google/genai/_gaos/types/decisions/createdecisionresponse.py)。实现直接使用已有 aiohttp，无需额外 SDK 依赖。
+接口依据：[Google 官方判别模型教程](https://codelabs.developers.google.com/codelabs/discriminative-models)、[Google Gen AI SDK Noul 定义](https://github.com/googleapis/python-genai/blob/main/google/genai/_gaos/types/decisions/noulquestion.py)、[Noul criteria 定义](https://github.com/googleapis/python-genai/blob/main/google/genai/_gaos/types/decisions/noulcriteria.py)、[响应结构](https://github.com/googleapis/python-genai/blob/main/google/genai/_gaos/types/decisions/createdecisionresponse.py)。实现直接使用已有 aiohttp，无需额外 SDK 依赖。
+
+## Hermes 代理与连接故障（0.5.2 起）
+
+收件箱推理与网页连接测试均调用 Hermes 的 `resolve_proxy_url` / `proxy_kwargs_for_aiohttp`，沿用 `gateway.trust_env`、进程环境中的 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` 及 `NO_PROXY`；由 Hermes 处理大小写、优先级和系统代理。无需在插件里保存另一份代理地址。禁用 `gateway.trust_env` 或目标匹配 `NO_PROXY` 时遵循 Hermes 的直连决定。代理环境变更后需重启 Gateway 和独立 Dashboard，使两者加载一致的环境。
+
+选中 SOCKS 但 Hermes 没有相应连接器时，明确报错，不静默改为直连。模型 API 地址和认证仍指向原 provider；不跟随重定向、不改 TLS 校验、不跨 provider 回退，也不自动读取 `.netrc`。
+
+页面区分网络超时、连接错误、HTTP 400/401/403/404/429 等稳定错误码，给出相应排查方向，不回显密钥或服务商原始错误正文。`jev_timeout` 表示网络或响应超时，不代表密钥错误；代理修通后仍需检查真实接口返回，不能把连通等同于推理成功。
+
+Google 的 bool criteria 字段与 TypeSafe 不同；0.5.0–0.5.1 错用了 `true` / `false`，会被 Google 以 HTTP 400 拒绝。0.5.2 保留自定义说明并正确转换为 `true_description` / `false_description`。请求预览与实际发送使用同一构造函数。
 
 ## 自定义提示词
 

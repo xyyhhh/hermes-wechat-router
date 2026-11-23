@@ -34,6 +34,10 @@ async def test_google_native_http_and_usage_reaches_main_assistant(store, cfg, m
         assert "Authorization" not in request.headers and not request.query
         payload = await request.json()
         assert payload == request_body
+        if mode == "bool":
+            # Google's actual schema differs from TypeSafe; reject the old request shape.
+            assert payload["questions"]["needs_followup"]["criteria"] == {
+                "true_description": cfg.positive_criteria, "false_description": cfg.negative_criteria}
         seen.append(payload)
         result = response(payload)
         result.pop("model", None)
@@ -93,3 +97,37 @@ async def test_google_missing_usage_is_unknown_not_zero(store, cfg):
                            endpoint=str(server.make_url("/v1beta/decisions")))
         result = validate_response(await client.evaluate(request_body), request_body)
     assert result["usage"] == {}
+
+
+async def test_explicit_proxy_is_used_without_environment_or_direct_fallback(store, cfg, monkeypatch):
+    request_body = build_request(json.loads(ready_batch(store, replace(cfg, provider="google"))["snapshot"]))
+    direct = []
+    proxied = []
+    async def target(request):
+        direct.append(True)
+        return web.Response(status=500)
+    async def proxy(request):
+        assert request.headers["x-goog-api-key"] == "synthetic-proxy-key"
+        assert request.raw_path.startswith("http://127.0.0.1:")
+        proxied.append(await request.json())
+        return web.json_response({"answers": {"needs_followup": {"type": "noul", "noul": .9}}})
+    target_app = web.Application(); target_app.router.add_post("/decisions", target)
+    proxy_app = web.Application(); proxy_app.router.add_route("*", "/{path:.*}", proxy)
+    async with TestServer(target_app) as upstream, TestServer(proxy_app) as forward, ClientSession(trust_env=False) as session:
+        monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:1")
+        client = JevClient(session, "synthetic-proxy-key", provider="google",
+                           endpoint=str(upstream.make_url("/decisions")), request_options={"proxy": str(forward.make_url("/"))})
+        assert validate_response(await client.evaluate(request_body), request_body)["answers"]["needs_followup"]["noul"] == .9
+    assert proxied == [request_body] and direct == []
+
+
+async def test_timeout_has_a_distinct_safe_error_code():
+    import asyncio
+    async def slow(request):
+        await asyncio.sleep(.1)
+        return web.json_response({})
+    app = web.Application(); app.router.add_post("/decisions", slow)
+    async with TestServer(app) as server, ClientSession(trust_env=False) as session:
+        client = JevClient(session, "synthetic-key", timeout=.01, provider="google", endpoint=str(server.make_url("/decisions")))
+        with pytest.raises(JevError, match="^jev_timeout$"):
+            await client.evaluate({})

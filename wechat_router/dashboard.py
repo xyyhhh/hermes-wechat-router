@@ -14,6 +14,7 @@ from . import __version__
 from .config import GOOGLE_MODEL, Settings, data_path
 from .store import Store
 from .jev import JevClient, JevError, build_request, preview_request, validate_response
+from .network import model_http_options
 
 router = APIRouter()
 EDITABLE = frozenset({
@@ -115,9 +116,11 @@ async def test_connection(body: dict[str, Any] = Body(...)):
                                "occurred_at": "2030-01-01T10:00:00+08:00", "chat_type": "group"}])
     request = build_request(snapshot)
     try:
-        async with ClientSession(trust_env=False) as session:
+        session_options, request_options = model_http_options(settings.provider_endpoint)
+        async with ClientSession(**session_options) as session:
             client = JevClient(session, key, settings.request_timeout, provider=settings.provider,
-                               endpoint=settings.provider_endpoint if settings.provider == "custom" else None)
+                               endpoint=settings.provider_endpoint if settings.provider == "custom" else None,
+                               request_options=request_options)
             result = await client.evaluate(request)
             validated = validate_response(result, request)
     except JevError as exc:

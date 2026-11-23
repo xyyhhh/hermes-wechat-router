@@ -28,9 +28,11 @@ def build_request(snapshot):
     }
     question = {"instructions": snapshot.get("decision_question", DEFAULT_EVENT_QUESTION)}
     if snapshot.get("decision_mode", "bool") == "bool":
+        positive, negative = (("true_description", "false_description") if snapshot.get("provider") == "google"
+                              else ("true", "false"))
         question.update(type="noul", criteria={
-            "true": snapshot.get("positive_criteria", DEFAULT_POSITIVE_CRITERIA),
-            "false": snapshot.get("negative_criteria", DEFAULT_NEGATIVE_CRITERIA),
+            positive: snapshot.get("positive_criteria", DEFAULT_POSITIVE_CRITERIA),
+            negative: snapshot.get("negative_criteria", DEFAULT_NEGATIVE_CRITERIA),
         })
     else:
         question.update(type="choice", criteria=snapshot.get("choice_criteria", DEFAULT_CHOICE_CRITERIA))
@@ -74,11 +76,12 @@ class JevClient:
 
     GOOGLE_ENDPOINT = GOOGLE_ENDPOINT
 
-    def __init__(self, session, api_key, timeout=15, *, endpoint=None, provider="typesafe"):
+    def __init__(self, session, api_key, timeout=15, *, endpoint=None, provider="typesafe", request_options=None):
         if provider not in ("typesafe", "custom", "google"):
             raise ValueError("unsupported provider")
         self.session, self.api_key, self.timeout = session, api_key, timeout
         self.provider = provider
+        self.request_options = request_options or {}
         self.endpoint = endpoint or (self.GOOGLE_ENDPOINT if provider == "google" else self.ENDPOINT)
 
     async def evaluate(self, request):
@@ -89,7 +92,7 @@ class JevClient:
                 self.endpoint, json=request,
                 headers=({"x-goog-api-key": self.api_key} if self.provider == "google"
                          else {"Authorization": f"Bearer {self.api_key}"}),
-                timeout=aiohttp.ClientTimeout(total=self.timeout), allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(total=self.timeout), allow_redirects=False, **self.request_options,
             ) as response:
                 if response.status != 200:
                     raise JevError(f"jev_http_{response.status}")
@@ -112,5 +115,7 @@ class JevClient:
                         "output_tokens": usage.get("total_output_tokens"),
                     } if isinstance(usage, dict) else {}}
                 return value
-        except (asyncio.TimeoutError, aiohttp.ClientError):
+        except asyncio.TimeoutError:
+            raise JevError("jev_timeout") from None
+        except aiohttp.ClientError:
             raise JevError("jev_transport_error") from None

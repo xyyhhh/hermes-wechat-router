@@ -43,7 +43,21 @@
     async function act(action) {
       setBusy(true); setError(""); setNotice("");
       try { await action(); }
-      catch (_) { setError("操作失败。请检查密钥、模型 ID、provider 地址、提示词、本人 ID、时区和 profile 名称，然后重试。"); }
+      catch (error) {
+        const match = String(error && error.message || "").match(/\b(jev_(?:timeout|transport_error|proxy_unavailable|http_\d{3}|invalid_[a-z_]+|response_too_large))\b/);
+        const code = match && match[1];
+        const descriptions = {
+          jev_proxy_unavailable: "Hermes 已选择代理，但缺少相应连接器。请检查 Hermes 的代理依赖。",
+          jev_timeout: "模型请求超时。请检查Hermes 代理和请求超时设置。",
+          jev_transport_error: "无法连接模型服务。请检查网络、DNS、TLS 和Hermes 代理。",
+          jev_http_400: "模型服务拒绝请求格式或参数，请核对模型 ID 或更新插件。",
+          jev_http_401: "模型服务认证失败，请检查已保存的密钥。",
+          jev_http_403: "模型服务拒绝访问，请检查密钥权限、项目或服务地区。",
+          jev_http_404: "模型或接口不存在，请核对模型 ID 和服务地址。",
+          jev_http_429: "模型服务限流或额度不足，请检查配额后重试。"
+        };
+        setError(code ? (descriptions[code] || "模型返回错误，请检查服务状态或响应格式。") + "（" + code + "）" : "操作失败。请检查已保存的密钥、模型和配置。连接测试只使用已保存设置。");
+      }
       finally { setBusy(false); }
     }
     function change(name, value) {
@@ -153,6 +167,7 @@
             ? "使用 Google 官方 /v1beta/decisions 接口。请在下方保存 GEMINI_API_KEY，通过 x-goog-api-key 认证。" : s.provider === "custom"
             ? "请求使用 TypeSafe System One 格式和 Bearer 认证。请在下方保存 WECHAT_ROUTER_API_KEY；不会使用官方 key 或自动回退到官方服务。"
             : "使用 https://api.typesafe.ai/v1/systemone，请在下方保存 TYPESAFE_API_KEY。"),
+          h("p", { className: "wr-muted" }, "模型请求沿用 Hermes 的代理设置（含 gateway.trust_env 与 NO_PROXY），无需在本插件另配代理。"),
           h("p", { className: "wr-muted" }, "修改后保存配置并重启 Gateway。保存页面不会向服务商发出请求。"),
           h("div", { className: "wr-actions" }, button("测试已保存的连接", () => act(async () => {
             setConnectionTest(null);
@@ -177,8 +192,8 @@
           textField("decision_question", "判断问题", "此文本是该批次唯一问题的 instructions。"),
           s.decision_mode === "bool" ? h("div", { className: "wr-grid" },
             field("bool_threshold", "交接概率阈值", "模型返回是的概率；达到阈值就交主助理，否则忽略本批。", { type: "number", min: 0.01, max: 0.99, step: 0.01 }),
-            textField("positive_criteria", "是：需要跟进", "作为 criteria.true。"),
-            textField("negative_criteria", "否：无需跟进", "作为 criteria.false。")) :
+            textField("positive_criteria", "是：需要跟进", "TypeSafe 使用 criteria.true；Google 使用 criteria.true_description。"),
+            textField("negative_criteria", "否：无需跟进", "TypeSafe 使用 criteria.false；Google 使用 criteria.false_description。")) :
             h("div", { className: "wr-grid" },
               ...[["ignore", "忽略"], ["watch", "继续观察"], ["act", "交主助理"]].map(([key, label]) =>
                 textField("criterion-" + key, label + "的判定说明", "选项键固定为 " + key + "，可编辑说明。",

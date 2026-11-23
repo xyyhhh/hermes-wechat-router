@@ -47,7 +47,9 @@ def main():
         env = {"HERMES_HOME": str(home), "PYTHONPATH": os.pathsep.join((str(source), str(plugin))),
                "WECHAT_ROUTER_SECRET": "synthetic-fixture-secret-" * 3,
                "TYPESAFE_API_KEY": "", "WECHAT_ROUTER_API_KEY": "synthetic-custom-fixture-key",
-               "GEMINI_API_KEY": "synthetic-google-fixture-key"}
+               "GEMINI_API_KEY": "synthetic-google-fixture-key",
+               "HTTPS_PROXY": "", "https_proxy": "", "HTTP_PROXY": "", "http_proxy": "",
+               "ALL_PROXY": "", "all_proxy": "", "NO_PROXY": "127.0.0.1,localhost", "no_proxy": ""}
         with patch.dict(os.environ, env):
             from hermes_cli.plugin_dev import doctor_plugin
             report = doctor_plugin(plugin)
@@ -62,6 +64,7 @@ def main():
             register(PluginContext(manifest, manager))
             try:
                 verify_dashboard(plugin, home)
+                verify_proxy_policy()
                 asyncio.run(exercise(home, wrapper, args.decision_mode, args.provider))
             finally:
                 manager.unload()
@@ -120,6 +123,21 @@ def verify_dashboard(plugin, home):
     print("Dashboard discovery, real API mount and profile-scoped config persistence: passed")
 
 
+def verify_proxy_policy():
+    from hermes_cli.config import save_config
+    from wechat_router.network import model_http_options
+    proxy = "http://127.0.0.1:7890"
+    with patch.dict(os.environ, {"HTTPS_PROXY": proxy, "NO_PROXY": "localhost,.example.org"}), \
+         patch("gateway.platforms.base.proxy_kwargs_for_aiohttp", side_effect=lambda value: ({}, {"proxy": value} if value else {})):
+        save_config({"gateway": {"trust_env": True}}, merge_existing=True)
+        assert model_http_options("https://generativelanguage.googleapis.com/v1beta/decisions")[1] == {"proxy": proxy}
+        assert model_http_options("https://api.example.org/decisions")[1] == {}
+        save_config({"gateway": {"trust_env": False}}, merge_existing=True)
+        assert model_http_options("https://generativelanguage.googleapis.com/v1beta/decisions")[1] == {}
+        save_config({"gateway": {"trust_env": True}}, merge_existing=True)
+    print("Actual Hermes proxy resolution, NO_PROXY and gateway.trust_env policy: passed")
+
+
 async def exercise(home, wrapper, decision_mode, provider):
     from types import SimpleNamespace
     from aiohttp import ClientSession, web
@@ -149,6 +167,8 @@ async def exercise(home, wrapper, decision_mode, provider):
         assert set(payload["questions"]) == {"needs_followup"}
         question = payload["questions"]["needs_followup"]
         assert question["instructions"] == "集成测试批次事件问题"
+        if provider == "google" and decision_mode == "bool":
+            assert set(question["criteria"]) == {"true_description", "false_description"}
         answers["needs_followup"] = ({"type": "noul", "noul": .95} if decision_mode == "bool" else
                                       {"type": "choice", "choice": "act", "confidence": .95})
         usage = ({"total_input_tokens": 200, "total_output_tokens": 0} if provider == "google"

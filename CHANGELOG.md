@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.2
+
+- Fix Google Noul criteria to true_description/false_description rather than TypeSafe true/false.
+- Reuse Hermes proxy resolution for both inference and Dashboard connection tests, including gateway.trust_env and NO_PROXY.
+- Fail explicitly when a selected proxy connector is unavailable; retain TLS checks and no redirects/fallback.
+- Distinguish timeout from connection errors and show safe, actionable error messages in Dashboard.
+- Tighten fixtures to check Google’s actual wire field names and exercise real Hermes proxy policy.
+
 ## 0.5.1
 
 - Align default policy, batch question and both modes’ criteria with conversation-isolated receive-order batching.

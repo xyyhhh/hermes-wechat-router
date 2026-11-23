@@ -69,6 +69,7 @@ hermes plugins update wechat-router
 - 0.5.0 起支持 Google Gemini Decisions 原生 API、独立 `GEMINI_API_KEY`、Google 请求预览，以及已保存连接的合成样例测试。
 - 0.4.0 起支持判断模式、判断问题、是/否说明、Choice 选项说明、阈值和请求 JSON 预览。
 - 0.5.1 起默认提示词明确批次／历史边界、跨批次回复、多话题和未知处理状态；相似内容不自动忽略。
+- 0.5.2 起沿用 Hermes 代理策略，修正 Google bool criteria 字段，并显示可读的连接错误。
 - Kanban 看板与唯一的主助理 profile。
 - 监听地址/端口，以及单独保存两个凭据。已有密钥只显示是否配置，不回显。
 - 消息数量、插件内部 Jev 调用/token 统计、暂停/恢复、失败批次重试。
@@ -209,7 +210,7 @@ hermes wechat-router retry <batch_id>
 
 插件对普通失败不承诺网络调用恰好一次；如果 Jev 已完成而进程在保存响应前崩溃，恢复时仍可能再次调用。评论按标记尽力去重，Kanban 卡片由原生幂等键去重。不要并行运行多个监听实例指向同一事件库，也不要在任务完成记录前手动归档刚创建的卡。
 
-模型请求只发往所选 provider，不进行跨提供商回退。第三方服务使用独立 key，不会收到官方 key；不跟随认证重定向，HTTP 客户端不继承代理环境变量。远程 provider 要求 HTTPS，本机回环代理允许 HTTP。模型调用的原始错误、认证头和正文不会进入插件日志。密钥可以用 Hermes 已有的 secret source 管理。
+模型请求只发往所选 provider，不进行跨提供商回退。第三方服务使用独立 key，不会收到官方 key；不跟随认证重定向，模型请求通过 Hermes 的原生代理解析 API 遵循 gateway.trust_env、代理环境变量及 NO_PROXY。远程 provider 要求 HTTPS，本机回环代理允许 HTTP。模型调用的原始错误、认证头和正文不会进入插件日志。密钥可以用 Hermes 已有的 secret source 管理。
 
 ## 模型与 token
 

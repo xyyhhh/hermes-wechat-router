@@ -28,6 +28,7 @@ def test_google_preview_and_synthetic_connection_test(ui, monkeypatch):
                         lambda key: selected_keys.append(key) or "synthetic-key")
     async def evaluate(self, request):
         assert self.provider == "google" and self.endpoint.endswith("/v1beta/decisions")
+        assert self.request_options == {}
         assert "synthetic-owner" in request["input"]
         assert "private-owner-id" not in request["input"] and "private-personal-policy" not in request["input"]
         return {"answers": {"needs_followup": {"type": "noul", "noul": .99}},
@@ -68,6 +69,7 @@ def ui(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "hermes_cli.config", hermes_config)
     monkeypatch.setitem(sys.modules, "gateway.platforms._shared", shared)
     monkeypatch.setattr(dashboard, "_home", lambda: tmp_path)
+    monkeypatch.setattr(dashboard, "model_http_options", lambda endpoint: ({"trust_env": False}, {}))
     app = FastAPI()
     app.include_router(dashboard.router, prefix="/api/plugins/wechat-router")
     with TestClient(app) as client:
