@@ -68,6 +68,7 @@ hermes plugins update wechat-router
 - 0.3.0 起支持第三方 System One provider 的 API 地址、独立凭据和请求超时，以及自定义 Jev 判断提示词和恢复默认规则。
 - 0.5.0 起支持 Google Gemini Decisions 原生 API、独立 `GEMINI_API_KEY`、Google 请求预览，以及已保存连接的合成样例测试。
 - 0.4.0 起支持判断模式、判断问题、是/否说明、Choice 选项说明、阈值和请求 JSON 预览。
+- 0.5.1 起默认提示词明确批次／历史边界、跨批次回复、多话题和未知处理状态；相似内容不自动忽略。
 - Kanban 看板与唯一的主助理 profile。
 - 监听地址/端口，以及单独保存两个凭据。已有密钥只显示是否配置，不回显。
 - 消息数量、插件内部 Jev 调用/token 统计、暂停/恢复、失败批次重试。

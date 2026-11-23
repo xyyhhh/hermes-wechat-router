@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1
+
+- Align default policy, batch question and both modes’ criteria with conversation-isolated receive-order batching.
+- Use bounded history only to interpret current messages; allow cross-batch confirmations and multiple topics.
+- Delegate semantic deduplication and execution-state checks to the main assistant; do not suppress similar messages.
+- Treat unconfirmed invitations and incomplete but identifiable events as potential handoffs, not automatic watch cases.
+- Keep configured thresholds, grouping settings, cached snapshots and existing custom prompts intact on upgrade.
+
 ## 0.5.0
 
 - Add Google Gemini Decisions native API: fixed /v1beta/decisions, JSON input text, x-goog-api-key and GEMINI_API_KEY.
