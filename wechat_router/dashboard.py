@@ -137,6 +137,18 @@ async def test_connection(body: dict[str, Any] = Body(...)):
             "synthetic_only": True, "requests": 1, "tasks_created": 0}
 
 
+@router.get("/network")
+def network_status():
+    from urllib.parse import urlsplit
+    from gateway.platforms.base import gateway_trust_env, resolve_proxy_url
+    settings = _validated(_platform().get("extra", {}))
+    proxy = resolve_proxy_url(target_hosts=urlsplit(settings.provider_endpoint).hostname)
+    parts = urlsplit(proxy) if proxy else None
+    return {"gateway_trust_env": gateway_trust_env(), "proxy": {
+        "scheme": parts.scheme, "host": parts.hostname, "port": parts.port,
+    } if parts else None}
+
+
 def _store():
     path = data_path(_home())
     if not path.is_file():
