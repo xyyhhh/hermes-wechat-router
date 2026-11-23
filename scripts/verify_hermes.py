@@ -195,6 +195,10 @@ async def exercise(home, wrapper, decision_mode, provider):
             assert adapter is not None
             try:
                 assert await adapter.connect()
+                # Hold processing until both synthetic messages are durably accepted;
+                # batching tests must not depend on hosted-runner scheduling speed.
+                inbox = Store(data_path(home))
+                inbox.pause(True)
                 base = f"http://127.0.0.1:{port}"
                 for i, text in enumerate(("周五三点开项目会？", "我可以参加")):
                     event = {"source": "fixture-listener", "event_id": str(i), "conversation_id": "fixture-group",
@@ -207,6 +211,7 @@ async def exercise(home, wrapper, decision_mode, provider):
                                                                         "POST", PREFIX + "/events", body)}
                     async with session.post(base + PREFIX + "/events", data=body, headers=headers) as result:
                         assert result.status == 202
+                inbox.pause(False)
                 path = PREFIX + "/events/status?source=fixture-listener&event_id=0"
                 outcome = None
                 for _ in range(200):

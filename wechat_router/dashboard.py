@@ -125,7 +125,10 @@ async def test_connection(body: dict[str, Any] = Body(...)):
             validated = validate_response(result, request)
     except JevError as exc:
         # Do not echo provider error bodies, authentication headers or arbitrary input.
-        raise HTTPException(502, exc.code) from None
+        detail = exc.code
+        if exc.code in ("jev_transport_error", "jev_timeout") and exc.__context__ is not None:
+            detail += " (" + type(exc.__context__).__name__ + ")"
+        raise HTTPException(502, detail) from None
     usage = validated["usage"]
     return {"ok": True, "provider": settings.provider, "model": settings.model,
             "answer": validated["answers"]["needs_followup"],
