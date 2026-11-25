@@ -6,6 +6,7 @@ import logging
 from .config import TYPESAFE_ENDPOINT
 from .jev import JevError, build_request, validate_response
 from .store import LostLease
+from .audit import audit_context
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,10 @@ class Engine:
                     snapshot.get("provider_endpoint", TYPESAFE_ENDPOINT) != self.cfg.provider_endpoint):
                 raise JevError("jev_provider_changed")
             request = build_request(snapshot)
-            response = await self.jev.evaluate(request)
+            with audit_context(origin="inbox", batch_id=batch["id"], attempt=batch["attempts"],
+                               source=batch["source"], conversation_id=batch["conversation_id"],
+                               mode=snapshot["mode"], decision_mode=snapshot.get("decision_mode", "bool")):
+                response = await self.jev.evaluate(request)
             await self.db(self.store.record_call, batch, response)
             decision = validate_response(response, request)
             await self.db(self.store.save, batch, decision=decision)

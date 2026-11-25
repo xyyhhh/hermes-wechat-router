@@ -30,6 +30,7 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
     const body = options && options.body && JSON.parse(options.body);
     requests.push({ url, options, body });
     if (url.endsWith("/config")) return structuredClone(config);
+    if (url.includes("/audit")) return { enabled: true, attempts: 9, pending: 0, errors: 1 };
     if (url.includes("/status")) return { initialized: true, paused, messages: 42, buffered: 3,
       usage: { calls: 4, input_tokens: 200, output_tokens: 80 }, failures: failure ? [{ id: "batch-1", error: "fixture_error" }] : [] };
     if (url.includes("/pause")) { paused = body.paused; return { paused }; }
@@ -61,6 +62,8 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
     await React.act(async () => { root.render(React.createElement(Component)); });
     assert.match(document.body.textContent, /Profile: work/);
     assert.match(document.body.textContent, /42/);
+    assert.match(document.body.textContent, /模型调用日志/);
+    assert.match(document.body.textContent, /已记录 9 次/);
     assert.equal(document.querySelector('[name="TYPESAFE_API_KEY"]').value, "");
     await React.act(async () => { document.querySelector('[name="receive_only"]').click(); });
     await React.act(async () => {

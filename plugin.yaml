@@ -1,7 +1,7 @@
 name: wechat-router
 label: WeChat Message Router
 kind: platform
-version: 0.5.2
+version: 0.6.0
 description: Batch WeChat messages, detect follow-up events with Google Gemini Decisions or Jev, and hand them to one main assistant through Hermes Kanban.
 author: xyyhhh
 license: MIT

@@ -9,6 +9,7 @@
   function Page() {
     const [config, setConfig] = React.useState(null);
     const [stats, setStats] = React.useState(null);
+    const [audit, setAudit] = React.useState(null);
     const [error, setError] = React.useState("");
     const [notice, setNotice] = React.useState("");
     const [busy, setBusy] = React.useState(false);
@@ -35,8 +36,9 @@
       const refresh = () => SDK.fetchJSON(scoped(base + "/status")).then(value => {
         if (!disposed) { setStats(value); setStatusError(""); }
       }).catch(() => { if (!disposed) setStatusError("状态刷新失败；下方数据可能已经过期。"); });
-      refresh();
-      const timer = setInterval(refresh, 10000);
+      const refreshAudit = () => SDK.fetchJSON(scoped(base + "/audit")).then(value => { if (!disposed) setAudit(value); }).catch(() => { if (!disposed) setAudit(null); });
+      refresh(); refreshAudit();
+      const timer = setInterval(() => { refresh(); refreshAudit(); }, 10000);
       return () => { disposed = true; clearInterval(timer); };
     }, [profile]);
 
@@ -44,9 +46,10 @@
       setBusy(true); setError(""); setNotice("");
       try { await action(); }
       catch (error) {
-        const match = String(error && error.message || "").match(/\b(jev_(?:timeout|transport_error|proxy_unavailable|http_\d{3}|invalid_[a-z_]+|response_too_large))\b/);
+        const match = String(error && error.message || "").match(/\b(jev_(?:timeout|transport_error|proxy_unavailable|http_\d{3}|invalid_[a-z_]+|response_too_large)|audit_unavailable)\b/);
         const code = match && match[1];
         const descriptions = {
+          audit_unavailable: "调用日志写入失败，请检查服务器磁盘和文件权限；该次请求可能已发出，请先核对日志。",
           jev_proxy_unavailable: "Hermes 已选择代理，但缺少相应连接器。请检查 Hermes 的代理依赖。",
           jev_timeout: "模型请求超时。请检查Hermes 代理和请求超时设置。",
           jev_transport_error: "无法连接模型服务。请检查网络、DNS、TLS 和Hermes 代理。",
@@ -131,6 +134,10 @@
               setStats(await SDK.fetchJSON(scoped(base + "/status")));
               setNotice("已重新排队；可能再次调用判别模型。");
             })))))),
+      h("section", { className: "wr-card" }, h("h2", null, "模型调用日志"),
+        h("p", null, "默认保留每次模型请求与原始响应，包括错误、超时和重试；只保存在当前 profile 的本地私有日志库，不记录认证头或密钥，不自动清理。"),
+        h("p", { className: "wr-muted" }, "位置：plugin-data/wechat-router/model-audit.sqlite3。原始响应最多保存 2 MiB，超过会标记截断；进程中断可能留下未完成记录。"),
+        h("p", null, audit ? "已记录 " + (audit.attempts || 0) + " 次，未完成 " + (audit.pending || 0) + " 次，错误 " + (audit.errors || 0) + " 次。" : "正在读取调用日志状态，或日志暂不可用。")),
       h("form", { onSubmit: event => { event.preventDefault(); act(async () => {
         await request("/config", "PUT", { enabled: config.enabled, settings: normalized() });
         setNotice("配置已保存。请重启当前 profile 的 Gateway 后生效。");

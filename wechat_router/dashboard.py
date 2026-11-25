@@ -15,6 +15,7 @@ from .config import GOOGLE_MODEL, Settings, data_path
 from .store import Store
 from .jev import JevClient, JevError, build_request, preview_request, validate_response
 from .network import model_http_options
+from .audit import AuditLog, audit_path, audit_context
 
 router = APIRouter()
 EDITABLE = frozenset({
@@ -102,6 +103,7 @@ async def test_connection(body: dict[str, Any] = Body(...)):
     if body:
         raise HTTPException(422, "Expected an empty object; test uses saved configuration")
     from aiohttp import ClientSession
+    import asyncio
     from gateway.platforms._shared import get_scoped_secret
     settings = _validated(_platform().get("extra", {}))
     key = get_scoped_secret(settings.provider_key_name)
@@ -120,8 +122,10 @@ async def test_connection(body: dict[str, Any] = Body(...)):
         async with ClientSession(**session_options) as session:
             client = JevClient(session, key, settings.request_timeout, provider=settings.provider,
                                endpoint=settings.provider_endpoint if settings.provider == "custom" else None,
-                               request_options=request_options)
-            result = await client.evaluate(request)
+                               request_options=request_options,
+                               audit=await asyncio.to_thread(AuditLog, audit_path(_home())))
+            with audit_context(origin="connection_test", decision_mode=settings.decision_mode):
+                result = await client.evaluate(request)
             validated = validate_response(result, request)
     except JevError as exc:
         # Do not echo provider error bodies, authentication headers or arbitrary input.
@@ -161,6 +165,14 @@ def status():
     if not data_path(_home()).is_file():
         return {"initialized": False}
     return {"initialized": True, **_store().status()}
+
+
+@router.get("/audit")
+def audit_status():
+    try:
+        return {"enabled": True, **AuditLog.summary(audit_path(_home()))}
+    except Exception:
+        raise HTTPException(503, "调用日志暂不可读，请检查服务器磁盘和文件权限。") from None
 
 
 @router.post("/pause")

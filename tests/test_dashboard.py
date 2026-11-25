@@ -89,6 +89,18 @@ def test_fresh_dashboard_does_not_create_inbox_or_leak_secrets(ui):
     assert writes == []
 
 
+def test_audit_status_exposes_only_summary_and_does_not_create_files(ui):
+    from wechat_router.audit import AuditLog, audit_path
+    client, _, _, home = ui
+    assert client.get("/api/plugins/wechat-router/audit").json()["initialized"] is False
+    assert not audit_path(home).exists()
+    log = AuditLog(audit_path(home))
+    log.begin({"input": "private-message-text"}, "google", "https://example.com", "synthetic-secret")
+    result = client.get("/api/plugins/wechat-router/audit")
+    assert result.json()["attempts"] == 1 and result.json()["pending"] == 1
+    assert "private-message-text" not in result.text
+
+
 def test_save_only_patches_plugin_fields_and_preserves_advanced_settings(ui):
     client, config, writes, _ = ui
     original = copy.deepcopy(config)

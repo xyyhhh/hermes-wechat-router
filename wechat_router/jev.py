@@ -2,6 +2,7 @@
 
 import json
 import math
+import time
 
 from dataclasses import asdict
 
@@ -76,17 +77,26 @@ class JevClient:
 
     GOOGLE_ENDPOINT = GOOGLE_ENDPOINT
 
-    def __init__(self, session, api_key, timeout=15, *, endpoint=None, provider="typesafe", request_options=None):
+    def __init__(self, session, api_key, timeout=15, *, endpoint=None, provider="typesafe", request_options=None, audit=None):
         if provider not in ("typesafe", "custom", "google"):
             raise ValueError("unsupported provider")
         self.session, self.api_key, self.timeout = session, api_key, timeout
         self.provider = provider
         self.request_options = request_options or {}
+        self.audit = audit
         self.endpoint = endpoint or (self.GOOGLE_ENDPOINT if provider == "google" else self.ENDPOINT)
 
     async def evaluate(self, request):
         import asyncio
         import aiohttp
+        attempt_id = None
+        if self.audit:
+            try:
+                attempt_id = await asyncio.to_thread(self.audit.begin, request, self.provider, self.endpoint, self.api_key)
+            except Exception:
+                raise JevError("audit_unavailable") from None
+        started = time.monotonic()
+        status, data, response_bytes, truncated, error_code = None, bytearray(), 0, False, None
         try:
             async with self.session.post(
                 self.endpoint, json=request,
@@ -94,13 +104,15 @@ class JevClient:
                          else {"Authorization": f"Bearer {self.api_key}"}),
                 timeout=aiohttp.ClientTimeout(total=self.timeout), allow_redirects=False, **self.request_options,
             ) as response:
-                if response.status != 200:
-                    raise JevError(f"jev_http_{response.status}")
-                data = bytearray()
+                status = response.status
                 async for part in response.content.iter_chunked(65536):
-                    data.extend(part)
-                    if len(data) > 2 * 1024 * 1024:
+                    response_bytes += len(part)
+                    data.extend(part[:max(0, 2 * 1024 * 1024 - len(data))])
+                    if response_bytes > 2 * 1024 * 1024:
+                        truncated = True
                         raise JevError("jev_response_too_large")
+                if status != 200:
+                    raise JevError(f"jev_http_{status}")
                 try:
                     value = json.loads(data)
                 except (ValueError, UnicodeError):
@@ -114,8 +126,29 @@ class JevClient:
                         "input_tokens": usage.get("total_input_tokens"),
                         "output_tokens": usage.get("total_output_tokens"),
                     } if isinstance(usage, dict) else {}}
+                if self.audit and request.get("questions"):
+                    try:
+                        validate_response(value, request)
+                    except JevError as exc:
+                        error_code = exc.code  # Journal the invalid answer; Engine still owns enforcement/accounting.
                 return value
         except asyncio.TimeoutError:
+            error_code = "jev_timeout"
             raise JevError("jev_timeout") from None
         except aiohttp.ClientError:
+            error_code = "jev_transport_error"
             raise JevError("jev_transport_error") from None
+        except asyncio.CancelledError:
+            error_code = "jev_cancelled"
+            raise
+        except Exception as exc:
+            error_code = exc.code if isinstance(exc, JevError) else "jev_client_error"
+            raise
+        finally:
+            if attempt_id is not None:
+                try:
+                    await asyncio.shield(asyncio.to_thread(self.audit.finish, attempt_id,
+                        status=status, body=bytes(data), response_bytes=response_bytes, truncated=truncated,
+                        elapsed_ms=round((time.monotonic() - started) * 1000), error_code=error_code, secret=self.api_key))
+                except Exception:
+                    raise JevError("audit_unavailable") from None

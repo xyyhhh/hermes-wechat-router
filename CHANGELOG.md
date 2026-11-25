@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0
+
+- Persist every model attempt before sending, with full request JSON, raw bounded response body, HTTP status, timing and retry/batch context.
+- Journal failures, timeouts, cancellations and invalid responses; preserve Google raw usage/probabilities and redact known API-key echoes.
+- Add private audit status in Dashboard and mode-0600 JSONL export; no automatic retention cleanup.
+- Exclude explicitly discarded backlog from all future model history while preserving delivery idempotency.
+- Keep the inbox schema and model/dispatch behavior unchanged; both runtime and synthetic connection tests use the same audit sink.
+
 ## 0.5.2
 
 - Fix Google Noul criteria to true_description/false_description rather than TypeSafe true/false.

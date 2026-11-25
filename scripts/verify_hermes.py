@@ -151,6 +151,7 @@ async def exercise(home, wrapper, decision_mode, provider):
     from wechat_router.kanban import KanbanClient
     from wechat_router.config import data_path
     from wechat_router.store import Store
+    from wechat_router.audit import audit_path, AuditLog
 
     requests = []
     async def evaluate(request):
@@ -231,6 +232,16 @@ async def exercise(home, wrapper, decision_mode, provider):
                 usage = Store(data_path(home)).status()["usage"]
                 assert usage["input_tokens"] == 200 and usage["calls"] == 1
                 assert usage["output_tokens"] == (0 if provider == "google" else 40)
+                assert AuditLog.summary(audit_path(home))["attempts"] == 1
+                import sqlite3
+                with sqlite3.connect(audit_path(home)) as audit_db:
+                    context, sent, raw, http_status, finished = audit_db.execute(
+                        "SELECT context_json,request_json,response_body,http_status,finished_at FROM attempts").fetchone()
+                assert json.loads(context)["batch_id"] == outcome["batch_id"]
+                assert json.loads(context)["origin"] == "inbox" and json.loads(sent) == requests[0]
+                assert json.loads(raw)["usage"] == ({"total_input_tokens": 200, "total_output_tokens": 0}
+                                                     if provider == "google" else {"input_tokens": 200, "output_tokens": 40})
+                assert http_status == 200 and finished
                 assert len(outcome["tasks"]) == 1
                 board = KanbanClient(adapter.settings, home)
                 task = await board.show(outcome["tasks"][0]["task_id"])

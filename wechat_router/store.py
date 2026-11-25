@@ -162,8 +162,10 @@ class Store:
             if not batch["snapshot"]:
                 rows = c.execute("SELECT seq,payload FROM messages WHERE batch_id=? ORDER BY seq", (batch["id"],)).fetchall()
                 current = [json.loads(x["payload"]) for x in rows]
-                history = c.execute("SELECT payload FROM messages WHERE source=? AND conversation_id=? "
-                                    "AND seq<? AND received_at>=? ORDER BY seq DESC LIMIT ?",
+                history = c.execute("SELECT m.payload FROM messages m WHERE m.source=? AND m.conversation_id=? "
+                                    "AND m.seq<? AND m.received_at>=? AND NOT EXISTS "
+                                    "(SELECT 1 FROM batches b WHERE b.id=m.batch_id AND b.outcome='discarded') "
+                                    "ORDER BY m.seq DESC LIMIT ?",
                                     (batch["source"], batch["conversation_id"], rows[0]["seq"],
                                      now - cfg.context_hours * 3600, cfg.max_context_messages)).fetchall()
                 context, count = [], 0

@@ -106,6 +106,24 @@ def test_snapshot_context_is_bounded_and_excludes_future_messages(store, cfg):
     assert [x["event_id"] for x in snap["messages"]] == ["1"]
 
 
+def test_discarded_backlog_never_reappears_in_context_or_reprocesses_on_retry(store, cfg):
+    import json
+    now = time.time()
+    old = message(cfg, "discarded", text="This old backlog must never reach the model")
+    store.accept(old, now=now - 2)
+    with store.connection(write=True) as connection:
+        connection.execute("INSERT INTO batches(id,source,conversation_id,created_at,status,outcome) "
+                           "VALUES('discard_fixture','listener','group-a',?,'done','discarded')", (now,))
+        connection.execute("UPDATE messages SET batch_id='discard_fixture'")
+    assert not store.accept(old)  # Already-acknowledged deliveries remain idempotent.
+    assert store.event_status("listener", "discarded")["outcome"] == "discarded"
+    store.accept(message(cfg, "fresh", text="A fresh message"), now=now - 1)
+    store.materialize(cfg, now=now)
+    batch = store.claim(cfg, now=now)
+    assert json.loads(batch["snapshot"])["context"] == []
+    assert [m["event_id"] for m in json.loads(batch["snapshot"])["messages"]] == ["fresh"]
+
+
 @pytest.mark.parametrize("change", [{"chat_type": "unknown"}, {"is_self": "false"},
                                   {"occurred_at": "2026-11-04T00:00:00"}, {"mentions": "owner"},
                                   {"text": ""}, {"event_id": "bad\nkey"}])

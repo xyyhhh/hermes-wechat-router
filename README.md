@@ -70,6 +70,7 @@ hermes plugins update wechat-router
 - 0.4.0 起支持判断模式、判断问题、是/否说明、Choice 选项说明、阈值和请求 JSON 预览。
 - 0.5.1 起默认提示词明确批次／历史边界、跨批次回复、多话题和未知处理状态；相似内容不自动忽略。
 - 0.5.2 起沿用 Hermes 代理策略，修正 Google bool criteria 字段，并显示可读的连接错误。
+- 0.6.0 起默认保留完整请求／原始响应日志，支持状态查看和私有 JSONL 导出。
 - Kanban 看板与唯一的主助理 profile。
 - 监听地址/端口，以及单独保存两个凭据。已有密钥只显示是否配置，不回显。
 - 消息数量、插件内部 Jev 调用/token 统计、暂停/恢复、失败批次重试。
@@ -211,6 +212,26 @@ hermes wechat-router retry <batch_id>
 插件对普通失败不承诺网络调用恰好一次；如果 Jev 已完成而进程在保存响应前崩溃，恢复时仍可能再次调用。评论按标记尽力去重，Kanban 卡片由原生幂等键去重。不要并行运行多个监听实例指向同一事件库，也不要在任务完成记录前手动归档刚创建的卡。
 
 模型请求只发往所选 provider，不进行跨提供商回退。第三方服务使用独立 key，不会收到官方 key；不跟随认证重定向，模型请求通过 Hermes 的原生代理解析 API 遵循 gateway.trust_env、代理环境变量及 NO_PROXY。远程 provider 要求 HTTPS，本机回环代理允许 HTTP。模型调用的原始错误、认证头和正文不会进入插件日志。密钥可以用 Hermes 已有的 secret source 管理。
+
+## 完整模型调用日志（0.6.0 起）
+
+所有运行时模型调用和网页连接测试默认记录到当前 profile 的 `$HERMES_HOME/plugin-data/wechat-router/model-audit.sqlite3`。发送前先持久化完整请求 JSON；返回后保存原始响应正文、HTTP 状态、UTC 起止时间、耗时、错误码，并关联批次 ID、会话、重试次数、模式。失败、超时、取消和重试各自保留一条记录；Google 原始 usage/probabilities/confidence 不会被归一化步骤覆盖。
+
+目录 0700、数据库和导出文件 0600。认证头不进入日志，已知模型 key 若被服务商回显会遮盖；日志包含消息及上下文，应作为私有数据留在服务器，不提交仓库。默认不自动删除或在一天后过期；原始响应保留上限 2 MiB，超出会标记 truncated，流中断时保留已收到部分。进程被强制终止可能留下未完成记录；未完成不代表服务商没有处理，不能从日志推断绝对零费用。日志无法开始落盘时不发送请求。
+
+网页的「模型调用日志」只展示计数与状态，不展示原文。`GET /api/plugins/wechat-router/audit` 使用同一 Dashboard 认证和 profile 隔离。普通运行日志仍仅记录错误码，不混入微信正文。
+
+按需在服务器导出 JSONL（不会调用模型，也不会覆盖已有文件）：
+
+```sh
+python3 ~/.hermes/plugins/wechat-router/scripts/export_audit.py \
+  --database ~/.hermes/plugin-data/wechat-router/model-audit.sqlite3 \
+  --output ~/wechat-model-audit.jsonl
+```
+
+可加 `--since 2026-11-25T00:00:00+00:00` 筛选。每行包含 request、原始 response（JSON 或文本）、context、HTTP 状态和错误，可用 context.batch_id 与收件箱批次、decision、outcome 联合分析。HTTP 200 仅表示收到响应，需结合 error_code 与批次结果判断是否通过校验。历史调用的原始响应不能靠升级追溯补出。
+
+显式清空积压时可以将旧消息归档为 `discarded` 批次：这些消息不再排队，也不进入新请求的 history；原文和事件 ID 仍在本地保留，重投同一事件不会重新消费。只接收模式、观察模式与执行模式仍分别由原配置决定，日志功能不会自行启用派单。
 
 ## 模型与 token
 

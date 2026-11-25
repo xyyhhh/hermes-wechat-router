@@ -15,6 +15,7 @@ from .jev import JevClient
 from .kanban import KanbanClient
 from .network import model_http_options
 from .store import Store
+from .audit import AuditLog, audit_path
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,8 @@ class WechatRouterAdapter(BasePlatformAdapter):
                 kanban = KanbanClient(cfg, self.home)
                 client = JevClient(self._session, api_key, cfg.request_timeout,
                                    endpoint=cfg.provider_endpoint if cfg.provider == "custom" else None,
-                                   provider=cfg.provider, request_options=request_options)
+                                   provider=cfg.provider, request_options=request_options,
+                                   audit=await asyncio.to_thread(AuditLog, audit_path(self.home)))
                 engine = Engine(store, cfg, client, kanban)
             self._runner = web.AppRunner(app, access_log=None)
             await self._runner.setup()
