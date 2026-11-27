@@ -84,15 +84,29 @@
     }
     function list(name, label, hint) {
       return h("label", { className: "wr-field", key: name }, h("span", null, label),
-        h("textarea", { name, rows: 3, disabled: busy, value: config.settings[name].join("\n"),
+        h("textarea", { name, rows: 3, disabled: busy, value: (config.settings[name] || []).join("\n"),
           onChange: event => change(name, event.target.value.split("\n")) }), h("small", null, hint));
     }
     function normalized() {
       const settings = { ...config.settings };
-      for (const name of ["owner_ids", "interests", "sources"]) {
-        settings[name] = settings[name].map(x => x.trim()).filter(Boolean);
+      for (const name of ["owner_ids", "owner_aliases", "interests", "sources"]) {
+        settings[name] = (settings[name] || []).map(x => x.trim()).filter(Boolean);
       }
+      settings.sender_rules = (settings.sender_rules || []).map(rule => ({ ...rule,
+        source: rule.source.trim(), sender_id: rule.sender_id.trim(),
+        conversation_id: (rule.conversation_id || "").trim(), name: (rule.name || "").trim(),
+        aliases: (rule.aliases || []).map(x => x.trim()).filter(Boolean)
+      }));
       return settings;
+    }
+    function changeRule(index, key, value) {
+      change("sender_rules", (config.settings.sender_rules || []).map((r, i) => i === index ? { ...r, [key]: value } : r));
+    }
+    function ruleField(rule, i, key, label) {
+      return h("label", { className: "wr-field", key }, h("span", null, label),
+        h("input", { name: "sender-" + i + "-" + key, disabled: busy,
+          value: key === "aliases" ? (rule.aliases || []).join(", ") : rule[key] || "",
+          onChange: e => changeRule(i, key, key === "aliases" ? e.target.value.split(/[,，]/) : e.target.value) }));
     }
     function button(label, onClick, disabled) {
       return h("button", { type: "button", disabled: busy || disabled, onClick }, label);
@@ -107,15 +121,16 @@
 
     return h("main", { className: "wr-page" },
       h("header", { className: "wr-header" }, h("div", null, h("h1", null, "微信消息分流"),
-        h("p", null, "微信消息 → 按会话合并 → 判别模型事件初筛 → 主助理处理和委派")),
+        h("p", null, "微信消息 → 按会话合并 → 判别模型时间安排初筛 → 主助理处理和委派")),
         h("span", { className: "wr-pill" }, "Profile: " + profile + " · v" + config.version)),
       error && h("p", { className: "wr-alert", role: "alert" }, error),
       notice && h("p", { className: "wr-notice", role: "status" }, notice),
       config.validation_error && h("p", { className: "wr-alert" }, config.validation_error),
       h("section", { className: "wr-card" }, h("h2", null, "处理状态"),
         h("p", null, !stats ? "正在读取状态…" : !stats.initialized ? "收件箱尚未初始化：配置后启动 Gateway。" :
-          stats.paused ? "已暂停处理新批次；接收接口仍可保存消息。" : "处理开关已开启；此状态不代表 Gateway 当前在线。"),
+          !config.enabled ? "接收平台已禁用；保存后需重启 Gateway。" : stats.paused ? "已暂停处理新批次；接收接口仍可保存消息。" : "处理开关已开启；此状态不代表 Gateway 当前在线。"),
         statusError && h("p", { role: "alert" }, statusError),
+        stats && stats.outcomes && h("p", { className: "wr-muted" }, "仅保存未推理：内容不可见 " + (stats.outcomes.content_unavailable || 0) + " 批；已知助理回执 " + (stats.outcomes.assistant_receipt || 0) + " 批。内容不可见不代表没有安排。"),
         h("div", { className: "wr-metrics" }, metric("已接收消息", stats && stats.messages),
           metric("等待合并", stats && stats.buffered), metric("模型调用", usage.calls),
           metric("输入 token", usage.input_tokens), metric("输出 token", usage.output_tokens)),
@@ -152,10 +167,24 @@
               h("small", null, "两种模式均产生 模型费用；观察模式不创建 Kanban 任务。")),
             h("label", { className: "wr-checkbox" }, h("input", { type: "checkbox", name: "receive_only", checked: !!s.receive_only,
               disabled: busy, onChange: e => change("receive_only", e.target.checked) }), "仅接收并暂存，不调用判别模型、不派单（无需模型 key；保存后重启 Gateway）"),
-            field("owner_name", "本人称呼"), field("timezone", "时区"),
+            field("owner_name", "本人姓名或常用称呼", "避免只填写‘我’；用于后续主助理核对身份。"), field("timezone", "时区"),
             list("owner_ids", "本人的微信 ID", "每行一个；使用消息源实际发送的 sender_id。执行模式必填。"),
-            list("interests", "关注事项", "每行一项，帮助判断群聊中与自己相关的信息。"),
+            list("owner_aliases", "本人群昵称和别名", "每行一个。发信人按稳定 ID 识别，别名只帮助理解称呼。"),
             list("sources", "消息源筛选", "每行一个 source；留空接收全部来源。私聊和群聊均处理。"))),
+        h("section", { className: "wr-card" }, h("h2", null, "发信人身份与重要性"),
+          h("p", { className: "wr-muted" }, "按消息源和稳定 sender_id 匹配；会话 ID 留空时对该来源全部会话生效，同一会话的专用规则覆盖通用规则。重要性只影响命中后的看板优先级（高 10、普通 0、低 -10），不改变模型问题、阈值或分批窗口。"),
+          ...(s.sender_rules || []).map((rule, i) => h("div", { className: "wr-rule", key: i },
+            h("div", { className: "wr-grid" },
+              ...[["source", "消息源 source"], ["sender_id", "发信人 sender_id"], ["conversation_id", "限定会话 ID（可选）"], ["name", "显示名称（可选）"], ["aliases", "昵称或别名（逗号分隔）"]].map(([key, label]) => ruleField(rule, i, key, label)),
+              h("label", { className: "wr-field" }, h("span", null, "重要性"),
+                h("select", { name: "sender-" + i + "-importance", value: rule.importance || "normal", disabled: busy, onChange: e => changeRule(i, "importance", e.target.value) },
+                  ...[["high", "高"], ["normal", "普通"], ["low", "低"]].map(([value, label]) => h("option", { key: value, value }, label)))),
+              h("label", { className: "wr-field" }, h("span", null, "账号类型"),
+                h("select", { name: "sender-" + i + "-role", value: rule.role || "person", disabled: busy, onChange: e => changeRule(i, "role", e.target.value) },
+                  h("option", { value: "person" }, "普通发信人"), h("option", { value: "assistant" }, "已知助理账号 · 只记录回执")))),
+            button("删除发信人规则 " + (i + 1), () => change("sender_rules", s.sender_rules.filter((_, n) => n !== i))))),
+          h("p", { className: "wr-muted" }, "助理账号消息不再触发新任务；只有 reply_to 能匹配本插件同会话的原任务时，执行模式才将回执追加原卡。无法关联时保留日志；本人发给助理的消息照常初筛。请核实账号身份后再设置。"),
+          button("添加发信人规则", () => change("sender_rules", [...(s.sender_rules || []), { source: "", sender_id: "", conversation_id: "", name: "", aliases: [], importance: "normal", role: "person" }]))),
         h("section", { className: "wr-card" }, h("h2", null, "判别模型 Provider"),
           h("div", { className: "wr-grid" },
             h("label", { className: "wr-field" }, h("span", null, "服务提供商"),
@@ -185,22 +214,29 @@
           h("label", { className: "wr-field" }, h("span", null, "总体判断规则"),
             h("textarea", { name: "jev_instructions", rows: 7, maxLength: 12000, disabled: busy,
               value: s.jev_instructions, onChange: e => change("jev_instructions", e.target.value) }),
-            h("small", null, "作为 state.routing_policy 发送给判别模型，描述什么事件需要跟进。主助理负责具体分类、拆分、合并和委派。最多 12,000 字符；较长提示词会增加每批输入 token。")),
+            h("small", null, "作为 state.routing_policy 发送给判别模型，只识别预约、邀请、计划、截止及其更新；不判断本人相关性或重要性。主助理负责核对、去重和后续处理。最多 12,000 字符；较长提示词会增加每批输入 token。")),
           h("div", { className: "wr-actions" },
             button("恢复默认提示词", () => change("jev_instructions", config.defaults.jev_instructions), !config.defaults),
+            button("使用默认时间安排初筛", () => {
+              setPreview(null); setConnectionTest(null);
+              const defaults = Object.fromEntries(["jev_instructions", "decision_question", "positive_criteria", "negative_criteria", "choice_criteria"]
+                .filter(k => config.defaults[k] !== undefined).map(k => [k, config.defaults[k]]));
+              setConfig(old => ({ ...old, settings: { ...old.settings, ...defaults } }));
+              setNotice("已填入默认时间安排规则；阈值和模式保持原值，请保存后重启 Gateway。");
+            }, !config.defaults),
             h("span", { className: "wr-muted" }, "恢复后需保存；已有批次保留原提示词。"))),
         h("section", { className: "wr-card" }, h("h2", null, "模型请求配置"),
-          h("p", { className: "wr-muted" }, "每个合并批次只问一个问题。判别模型不选择 agent；命中事件统一交给下方主助理。"),
+          h("p", { className: "wr-muted" }, "每批只问有无时间安排线索。支持时间未定的邀请和跨批确认；命中后由主助理核对是否与本人有关、是否值得行动。"),
           h("label", { className: "wr-field" }, h("span", null, "判断模式"),
             h("select", { name: "decision_mode", value: s.decision_mode, disabled: busy,
               onChange: e => change("decision_mode", e.target.value) },
-              h("option", { value: "bool" }, "布尔 · 是否存在需跟进事件（Noul）"),
+              h("option", { value: "bool" }, "布尔 · 是否存在时间安排（Noul）"),
               h("option", { value: "choice" }, "选择 · 忽略 / 观察 / 交主助理（Choice）"))),
           textField("decision_question", "判断问题", "此文本是该批次唯一问题的 instructions。"),
           s.decision_mode === "bool" ? h("div", { className: "wr-grid" },
-            field("bool_threshold", "交接概率阈值", "模型返回是的概率；达到阈值就交主助理，否则忽略本批。", { type: "number", min: 0.01, max: 0.99, step: 0.01 }),
-            textField("positive_criteria", "是：需要跟进", "TypeSafe 使用 criteria.true；Google 使用 criteria.true_description。"),
-            textField("negative_criteria", "否：无需跟进", "TypeSafe 使用 criteria.false；Google 使用 criteria.false_description。")) :
+            field("bool_threshold", "交接分数阈值", "Noul 分数达到阈值时交主助理；不是经过本地校准的准确率。", { type: "number", min: 0.01, max: 0.99, step: 0.01 }),
+            textField("positive_criteria", "是：存在安排线索", "TypeSafe 使用 criteria.true；Google 使用 criteria.true_description。"),
+            textField("negative_criteria", "否：没有安排线索", "TypeSafe 使用 criteria.false；Google 使用 criteria.false_description。")) :
             h("div", { className: "wr-grid" },
               ...[["ignore", "忽略"], ["watch", "继续观察"], ["act", "交主助理"]].map(([key, label]) =>
                 textField("criterion-" + key, label + "的判定说明", "选项键固定为 " + key + "，可编辑说明。",
@@ -217,7 +253,7 @@
             field("max_batch_messages", "每批消息上限", "范围 1–20；达到上限可提前判断。", { type: "number", min: 1, max: 20, step: 1 }),
             field("max_context_chars", "历史上下文字符上限", "限制每次判断携带的历史内容。", { type: "number", min: 1, step: 1 }))),
         h("section", { className: "wr-card" }, h("h2", null, "统一交主助理"),
-          h("p", { className: "wr-muted" }, "一个命中批次生成一条 Kanban 任务，附该批次全部消息、上下文和已有线索。由主助理决定后续 agent。"),
+          h("p", { className: "wr-muted" }, "一个命中批次生成一条 Kanban 交接任务，附完整原文、身份信息、引用和上下文。多次交接可能属于同一事项，由主助理关联已有任务并决定后续 agent。"),
           h("div", { className: "wr-grid" }, field("board", "看板名称"), field("assistant_profile", "主助理 profile", "填写已创建的主助理，默认 assistant。"))),
         h("section", { className: "wr-card" }, h("h2", null, "消息接入"),
           h("div", { className: "wr-grid" }, field("host", "监听地址"), field("port", "监听端口", null,

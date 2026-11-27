@@ -27,6 +27,9 @@ def build_request(snapshot):
         "existing_threads": [{"ref": f"t{i}", "category": t["category"], "phase": t["phase"],
                               "excerpt": t["excerpt"]} for i, t in enumerate(snapshot["candidates"])],
     }
+    if snapshot.get("input_format") == 2:
+        from .compact import compact_state
+        state = compact_state(snapshot, snapshot.get("jev_instructions", DEFAULT_JEV_INSTRUCTIONS))
     question = {"instructions": snapshot.get("decision_question", DEFAULT_EVENT_QUESTION)}
     if snapshot.get("decision_mode", "bool") == "bool":
         positive, negative = (("true_description", "false_description") if snapshot.get("provider") == "google"
@@ -37,14 +40,14 @@ def build_request(snapshot):
         })
     else:
         question.update(type="choice", criteria=snapshot.get("choice_criteria", DEFAULT_CHOICE_CRITERIA))
-    content = ({"input": json.dumps(state, ensure_ascii=False)} if snapshot.get("provider") == "google"
+    content = ({"input": json.dumps(state, ensure_ascii=False, separators=(",", ":"))} if snapshot.get("provider") == "google"
                else {"state": state})
     return {"model": snapshot["model"], **content, "questions": {"needs_followup": question}}
 
 
 def preview_request(settings):
     snapshot = asdict(settings)
-    snapshot.update(messages=[{"text": "（此处为合并后的消息；预览不读取真实消息）"}], context=[], candidates=[])
+    snapshot.update(input_format=2, messages=[{"text": "（此处为合并后的消息；预览不读取真实消息）"}], context=[], candidates=[])
     return build_request(snapshot)
 
 

@@ -30,7 +30,7 @@ def test_cross_batch_reply_has_same_chat_history_without_other_topics_being_merg
     store.materialize(cfg, now=now)
     first = store.claim(cfg, now=now)
     request, state = state_of(first)
-    assert [event["event_id"] for event in state["messages"]] == ["invite", "chitchat"]
+    assert [event["text"] for event in state["messages"]] == [events[0]["text"], events[1]["text"]]
     assert set(request["questions"]) == {"needs_followup"}
     store.finish(first, "observed")
     # Finish unrelated batches without inference, then claim the cross-boundary reply.
@@ -42,10 +42,10 @@ def test_cross_batch_reply_has_same_chat_history_without_other_topics_being_merg
             break
         store.finish(batch, "ignored")
     _, state = state_of(batch)
-    assert [event["event_id"] for event in state["messages"]] == ["confirm"]
-    assert state["messages"][0]["reply_to"] == "invite"
-    assert [event["event_id"] for event in state["history"]] == ["invite", "chitchat"]
-    assert state["existing_threads"] == []
+    assert [event["text"] for event in state["messages"]] == ["我能参加"]
+    assert state["messages"][0]["reply_to"] == "h0"
+    assert [event["text"] for event in state["history"]] == [events[0]["text"], events[1]["text"]]
+    assert "existing_threads" not in state
 
 
 def test_receive_order_and_truncated_history_are_visible_without_invented_reply_text(store, cfg):
@@ -57,14 +57,14 @@ def test_receive_order_and_truncated_history_are_visible_without_invented_reply_
                          occurred_at="2026-11-23T12:00:00+08:00"), now=now - 1)
     store.materialize(cfg, now=now)
     first = store.claim(cfg, now=now)
-    assert state_of(first)[1]["messages"][0]["event_id"] == "received-first"
+    assert state_of(first)[1]["messages"][0]["text"] == "上文比较长，因此只保留结尾"
     store.finish(first, "ignored")
     store.materialize(cfg, now=now)
     _, state = state_of(store.claim(cfg, now=now))
-    assert state["messages"][0]["reply_to"] == "not-in-input"
+    assert state["messages"][0]["reply_to"] == "unavailable"
     assert state["history"][0]["truncated"] is True
     assert len(state["history"][0]["text"]) == 5
-    assert all(event["event_id"] != "not-in-input" for event in state["history"])
+    assert "not-in-input" not in json.dumps(state)
 
 
 def test_prompt_update_applies_to_new_batch_but_keeps_retry_snapshot(store, cfg):

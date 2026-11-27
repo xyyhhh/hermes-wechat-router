@@ -32,4 +32,6 @@
 .wr-preview { overflow: auto; max-height: 440px; white-space: pre-wrap; overflow-wrap: anywhere; padding: 16px; border: 1px solid var(--border, #8885); border-radius: 7px; font-size: .8rem; margin-top: 16px; }
 .wr-failure { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; overflow-wrap: anywhere; }
 .wr-failure span { flex: 1; }
+.wr-rule { border: 1px solid var(--border, #8885); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.wr-rule > button { margin-top: 12px; }
 @media (max-width: 700px) { .wr-page { padding: 20px 12px; } .wr-grid { grid-template-columns: 1fr; } .wr-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .wr-secret { align-items: stretch; flex-direction: column; } }

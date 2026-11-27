@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0
+
+- Narrow the default gate to time-plan signals and updates; defer owner relevance, importance, execution state and date extraction to the main assistant.
+- Compact model inputs with shared conversation/people metadata, localized timestamps, bounded explicit quote resolution and no task-state/priority leakage. Freeze legacy request formats for existing snapshots.
+- Preserve unobservable media without inference or a fabricated negative decision. Add visible outcome counts.
+- Add Dashboard sender identity/alias, source/chat-scoped importance and assistant-role configuration. Importance affects only Kanban priority, not model questions or thresholds.
+- Record known assistant receipts without generating new work; append only server-verified replies to this plugin’s original same-chat/board/assistant task, and never write receipts in observe mode.
+- Add synthetic temporal evaluation cases and an explicit paid runner that stops on the first service error. Keep plugin receive/observe controls unchanged on upgrade.
+
 ## 0.6.0
 
 - Persist every model attempt before sending, with full request JSON, raw bounded response body, HTTP status, timing and retry/batch context.

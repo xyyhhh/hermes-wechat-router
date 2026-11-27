@@ -1,6 +1,6 @@
 # Hermes WeChat Router
 
-把外部监听器提交的微信消息合并成批次，用 **Google Gemini Decisions 或 Jev** 判断与账号本人有关的预约、期限、待办和重要事件，再通过 **Hermes 原生 Kanban** 统一交给主助理；由主助理分类、拆分、关联已有任务并委派专业 agent。
+把外部监听器提交的微信消息合并成批次，用 **Google Gemini Decisions 或 Jev** 初筛预约、邀请、计划、截止及其更新的线索，再通过 **Hermes 原生 Kanban** 统一交给主助理；由主助理分类、拆分、关联已有任务并委派专业 agent。
 
 私聊和群聊都接收。插件内部只调用所配置 provider 的 Google Decisions 或 TypeSafe System One 兼容 API；不调用聊天模型、不生成 LLM 摘要。后续 Kanban Agent 使用其 profile 的模型，属于另一次任务执行。
 
@@ -12,19 +12,46 @@
 flowchart TD
     A[外部监听器逐条提交消息] --> B[签名校验、去重、持久化]
     B --> C[按来源与聊天合并]
-    C --> D[近期对话、待观察线索、相关事务]
-    D --> E[一次判别请求，一个批次事件问题]
+    C --> D[精简消息、必要身份、时间和引用]
+    D --> E[一次判别请求，一个时间安排问题]
     E --> F{处理结果}
     F -->|忽略| G[记录结果]
     F -->|观察 Choice 模式| H[保存线索，等待新消息]
-    F -->|有需处理事件| I[创建一条主助理 Kanban 任务]
+    F -->|有时间安排线索| I[创建一条主助理 Kanban 任务]
     I --> J[主助理核对、拆分、合并]
     J --> K[主助理按需要委派专业 agent]
 ```
 
 默认安静窗口 8 秒，最长等待 60 秒；达到 12 条消息也会提前形成批次。不同聊天互不合并，同一聊天的批次按接收顺序处理。每批正文最多 12,000 字符，近期上下文最多 6,000 字符，候选事务最多 8 个。以上是字符/条数上限，不是精确 token 上限。
 
-0.4.0 起，每个批次只问一个“是否有需处理事件”的问题，支持布尔（原生 Noul）或选择（Choice）模式。命中后将整个批次、近期上下文和已有任务线索交给配置的主助理（默认 `assistant`）。Jev 不再判断分类、选择 agent 或决定任务关联；这些由主助理处理。
+0.4.0 起，每个批次只问一个“是否有时间安排线索”的问题，支持布尔（原生 Noul）或选择（Choice）模式。命中后将整个批次、近期上下文和已有任务线索交给配置的主助理（默认 `assistant`）。初筛不判断本人相关性、重要性、是否已处理或过期，也不推算精确日期；这些由主助理核对。时间待定的具体邀请也可命中。只有历史出现安排不触发，无关闲聊不抵消本批有效邀请。
+
+## 时间安排初筛、身份与重要性（0.7.0）
+
+- 新请求保留每条正文、发送时间、必要时的接收时间和引用关系；会话信息只写一次，人员使用短代号。原始 ID、完整消息、相关看板线索留在本地和主助理交接中，初筛不读取任务状态。
+- `reply_to` 可以解析本地同 source/会话中的原文，即使它已超出近期历史窗口；排除 discarded 归档。额外引用最多 8 条、正文合计最多 `min(2000, max_context_chars)` 字符，截断会标记，找不到时明确 unavailable。
+- 纯图片、语音等无正文占位不调用模型，结果为 `content_unavailable`，不是“没有安排”。所有原文仍保留；模型不做 OCR、媒体下载或语音转写。
+- Dashboard 可配置 `owner_aliases` 和 `sender_rules`。规则按 `(source, sender_id)` 匹配，可加 `conversation_id` 限定会话；会话规则覆盖通用规则中明确设置的字段。显示名称不作为身份主键。
+- 发信人重要性为 `high` / `normal` / `low`。命中批次取当前可见普通发信人的最高级别，映射 Kanban 优先级 `10 / 0 / -10`；不改变模型输入、阈值、合并窗口，不跳过低重要性发信人。
+- `role: assistant` 仅由本地规则设置，消息文本不能自称助理绕过筛选。已知助理消息只记回执；仅当 `reply_to` 对应本插件同来源、同会话、同看板、同主助理的原任务时，执行模式追加原卡。不匹配时仍保存，结果为 `assistant_receipt`，不新建卡。本人发送给助理的消息正常初筛。
+- 自定义提示词升级时不会被覆盖。旧版本用户可在页面点“使用默认时间安排初筛”，一起恢复总体规则、问题和选项，再保存、重启 Gateway。旧批次快照和失败重试保持原请求格式与规则，不自动重判。
+
+规则示例（也可直接用网页表单配置）：
+
+```yaml
+sender_rules:
+  - source: wechat-listener
+    sender_id: stable-colleague-id
+    name: 同事
+    aliases: [群昵称]
+    importance: high
+    role: person
+  - source: wechat-listener
+    sender_id: stable-assistant-id
+    role: assistant
+```
+
+高重要性不是“所有消息都派发”。群里他人的安排也可能通过时间初筛，主助理负责最终相关性、拆分、关联和行动判断；多条交接卡并不等于多个独立事项。
 
 ## 安装
 
@@ -63,13 +90,14 @@ hermes plugins update wechat-router
 
 页面支持：
 
-- 启用平台、观察/执行模式、本人 ID、关注事项、来源筛选和时区。
+- 启用平台、观察/执行模式、本人 ID、姓名/昵称、来源筛选和时区。
 - Jev 模型、消息合并窗口、每批上限、上下文上限和置信度阈值。
 - 0.3.0 起支持第三方 System One provider 的 API 地址、独立凭据和请求超时，以及自定义 Jev 判断提示词和恢复默认规则。
 - 0.5.0 起支持 Google Gemini Decisions 原生 API、独立 `GEMINI_API_KEY`、Google 请求预览，以及已保存连接的合成样例测试。
 - 0.4.0 起支持判断模式、判断问题、是/否说明、Choice 选项说明、阈值和请求 JSON 预览。
 - 0.5.1 起默认提示词明确批次／历史边界、跨批次回复、多话题和未知处理状态；相似内容不自动忽略。
 - 0.5.2 起沿用 Hermes 代理策略，修正 Google bool criteria 字段，并显示可读的连接错误。
+- 0.7.0 起支持时间安排初筛、精简输入、引用原文解析、发信人身份/重要性和回执关联。
 - 0.6.0 起默认保留完整请求／原始响应日志，支持状态查看和私有 JSONL 导出。
 - Kanban 看板与唯一的主助理 profile。
 - 监听地址/端口，以及单独保存两个凭据。已有密钥只显示是否配置，不回显。
@@ -91,7 +119,8 @@ platforms:
     enabled: true
     extra:
       mode: observe
-      owner_name: 我
+      owner_name: 你的姓名或常用称呼
+      owner_aliases: [你的群昵称]
       owner_ids: [YOUR_WECHAT_ID]
       sources: [wechat-listener]
       timezone: Asia/Shanghai
@@ -101,7 +130,7 @@ platforms:
       bool_threshold: 0.6
 ```
 
-`owner_ids`、`sources`、主助理 profile 名称需要按实际环境设置。提供自己发出的消息、发送者稳定 ID 和 `mentions`，才能更可靠地判断群聊相关性与预约确认状态。目标 profile 必须已经存在，插件不会自动创建 profile。
+`owner_ids`、`sources`、主助理 profile 名称需要按实际环境设置。提供自己发出的消息、发送者稳定 ID 和 `mentions`，让后续主助理核对群聊相关性与预约确认状态。目标 profile 必须已经存在，插件不会自动创建 profile。
 
 默认只绑定回环地址。远程监听器通过部署方已有的 HTTPS 入口访问；`host`、`port` 可以配置。插件会在 Gateway 启动时启动 HTTP 接口和队列处理器，关闭时停止接收并取消处理；已接收的消息和未完成批次留在事件库中恢复。
 

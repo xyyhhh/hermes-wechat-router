@@ -43,7 +43,7 @@
 | `sender_name` | string / 否 | 发送者显示名称，不用于识别发送者 |
 | `is_self` | boolean / 否 | 是否账号本人发出；省略时根据 `owner_ids` 判断，不能传字符串 `"false"` |
 | `mentions` | string[] / 否 | 被 @ 的人的稳定 ID；默认空列表，最多 100 项，每项最多 256 字符 |
-| `reply_to` | string / 否 | 被引用消息的标识，辅助判断上下文 |
+| `reply_to` | string / 否 | 被引用消息的完整 event_id；插件可在同 source/会话本地查找原文，缺失时不会猜测 |
 | `message_type` | string / 否 | `text`、`image`、`voice`、`video`、`file`、`link`、`system` 或 `other`，默认 `text` |
 
 ID 字段和 `occurred_at` 长度不超过 256 字符且不能含控制字符；显示名称和 `reply_to` 不超过 256 字符。请求体默认不超过 **128 KiB**（按字节计算）。未列出的字段会返回 400，请先将提供程序原始字段映射为上述字段。
@@ -113,6 +113,15 @@ signature = "sha256=" + hmac.new(
 
 后两个 GET 需要签名，METHOD 为 `GET`、body 为空；**查询字符串必须按实际编码和顺序包含在签名路径中**。
 
-消息状态为 `buffered` → `queued` → `processing` → `done`；失败退避时回到 `queued`，超过重试上限后为 `failed`。批次完成的 `outcome` 为 `observed`、`ignored`、`watch` 或 `task_created`。`task_created` 表示任务已交给 Kanban，不代表后续 Agent 已完成。
+消息状态为 `buffered` → `queued` → `processing` → `done`；失败退避时回到 `queued`，超过重试上限后为 `failed`。批次完成的 `outcome` 为 `observed`、`ignored`、`watch`、`task_created`、`content_unavailable` 或 `assistant_receipt`。`task_created` 表示任务已交给 Kanban，不代表后续 Agent 已完成。
 
 默认 `observe` 模式会调用 Jev但不建卡。已落盘事件后来进入 `failed` 时，应在 Hermes 端修复并重试批次，提供程序不需要换新消息 ID 再发一遍。
+
+
+## 0.7.0 所需信息与回执
+
+接入 JSON 字段保持兼容，无需新增必填项。请尽量提供原始 `occurred_at`、稳定 `sender_id`、实际昵称、`is_self`、结构化 `mentions` 及完整 `reply_to`。插件自行记录接收时间；不要用接收时间覆盖原始发送时间。转发文本里的历史日期也不要擅自改写。
+
+已有 OCR/转写可以放进 `text`；没有正文的媒体会保留为 `content_unavailable`，不会强行判为无安排。它们没有模型 decision。已知助理账号在 Hermes 网页按 `(source, sender_id)` 配置，不接受消息体指定重要性或助理角色。
+
+若提供程序能将助理输出和原输入关联，请让该输出事件的 `reply_to` 指向原输入 `event_id`。插件只会对自己已创建且同来源、会话、看板与主助理的任务追加回执；`reply_to` 不允许指定任意任务 ID。没有可验证关联的助理回执仅保存为 `assistant_receipt`，不产生新卡或模型请求。对话中本人发出的消息不受该账号规则影响。观察模式不向任何任务追加评论。

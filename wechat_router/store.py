@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 import time
 import uuid
+from datetime import datetime, timezone
 
 from .events import digest, encode
 
@@ -160,9 +161,12 @@ class Store:
             c.execute("UPDATE batches SET status='processing',lease=?,lease_until=?,attempts=attempts+1 "
                       "WHERE id=?", (token, now + cfg.lease_seconds, batch["id"]))
             if not batch["snapshot"]:
-                rows = c.execute("SELECT seq,payload FROM messages WHERE batch_id=? ORDER BY seq", (batch["id"],)).fetchall()
-                current = [json.loads(x["payload"]) for x in rows]
-                history = c.execute("SELECT m.payload FROM messages m WHERE m.source=? AND m.conversation_id=? "
+                rows = c.execute("SELECT seq,payload,received_at FROM messages WHERE batch_id=? ORDER BY seq", (batch["id"],)).fetchall()
+                def received(row):
+                    return {**json.loads(row["payload"]), "received_at": datetime.fromtimestamp(
+                        row["received_at"], timezone.utc).isoformat()}
+                current = [received(x) for x in rows]
+                history = c.execute("SELECT m.payload,m.received_at FROM messages m WHERE m.source=? AND m.conversation_id=? "
                                     "AND m.seq<? AND m.received_at>=? AND NOT EXISTS "
                                     "(SELECT 1 FROM batches b WHERE b.id=m.batch_id AND b.outcome='discarded') "
                                     "ORDER BY m.seq DESC LIMIT ?",
@@ -170,7 +174,7 @@ class Store:
                                      now - cfg.context_hours * 3600, cfg.max_context_messages)).fetchall()
                 context, count = [], 0
                 for x in history:
-                    message = json.loads(x[0])
+                    message = received(x)
                     remaining = cfg.max_context_chars - count
                     if remaining <= 0:
                         break
@@ -183,10 +187,35 @@ class Store:
                     "SELECT * FROM threads WHERE source=? AND conversation_id=? AND updated_at>=? "
                     "ORDER BY updated_at DESC LIMIT ?", (batch["source"], batch["conversation_id"],
                                                           now - cfg.candidate_days * 86400, cfg.max_candidates))]
-                snapshot = {"messages": current, "context": list(reversed(context)), "candidates": candidates,
+                context = list(reversed(context))
+                # Resolve explicit references only, within this source/chat and outside discarded archives.
+                # Additional quotes have their own small bound; old history is not silently enlarged.
+                known = {m["event_id"] for m in current + context}
+                reply_context, quote_chars = [], 0
+                for message in current + context:
+                    target = message.get("reply_to")
+                    if not target or target in known or len(reply_context) >= 8:
+                        continue
+                    quote = c.execute("SELECT m.payload,m.received_at FROM messages m WHERE m.source=? "
+                                      "AND m.conversation_id=? AND m.event_id=? AND NOT EXISTS "
+                                      "(SELECT 1 FROM batches b WHERE b.id=m.batch_id AND b.outcome='discarded')",
+                                      (batch["source"], batch["conversation_id"], target)).fetchone()
+                    remaining = min(2000, cfg.max_context_chars) - quote_chars
+                    if quote is None or remaining <= 0:
+                        continue
+                    quote = received(quote)
+                    if len(quote["text"]) > remaining:
+                        quote["text"] = quote["text"][:remaining]
+                        quote["truncated"] = True
+                    quote_chars += len(quote["text"])
+                    reply_context.append(quote)
+                    known.add(target)
+                snapshot = {"input_format": 2, "messages": current, "context": context,
+                            "reply_context": reply_context, "candidates": candidates,
                             "mode": cfg.mode, "routes": cfg.routes, "triage_profile": cfg.triage_profile,
                             "board": cfg.board, "min_confidence": cfg.min_confidence,
                             "owner_name": cfg.owner_name, "owner_ids": list(cfg.owner_ids),
+                            "owner_aliases": list(cfg.owner_aliases), "sender_rules": cfg.sender_rules,
                             "interests": list(cfg.interests), "timezone": cfg.timezone, "model": cfg.model,
                             "provider": cfg.provider, "provider_base_url": cfg.provider_base_url,
                             "provider_endpoint": cfg.provider_endpoint,
@@ -195,6 +224,24 @@ class Store:
                             "bool_threshold": cfg.bool_threshold, "positive_criteria": cfg.positive_criteria,
                             "negative_criteria": cfg.negative_criteria, "choice_criteria": cfg.choice_criteria,
                             "assistant_profile": cfg.assistant_profile}
+                from .identity import sender_policy
+                receipts = []
+                for message in current:
+                    if sender_policy(message, snapshot)["role"] != "assistant":
+                        continue
+                    # The listener supplies only reply_to; the server proves ownership of any target card.
+                    target = c.execute("SELECT b.plan FROM messages m JOIN batches b ON b.id=m.batch_id "
+                                       "WHERE m.source=? AND m.conversation_id=? AND m.event_id=? "
+                                       "AND b.outcome!='discarded'", (batch["source"], batch["conversation_id"],
+                                                                      message.get("reply_to", ""))).fetchone()
+                    effects = json.loads(target["plan"] or "[]") if target else []
+                    for effect in effects:
+                        if (effect.get("task_id") and effect["board"] == cfg.board and
+                                effect["profile"] == cfg.assistant_profile and c.execute(
+                                    "SELECT 1 FROM threads WHERE source=? AND conversation_id=? AND task_id=? AND board=?",
+                                    (batch["source"], batch["conversation_id"], effect["task_id"], cfg.board)).fetchone()):
+                            receipts.append({"event_id": message["event_id"], "task_id": effect["task_id"]})
+                snapshot["receipt_targets"] = receipts
                 batch["snapshot"] = encode(snapshot)
                 c.execute("UPDATE batches SET snapshot=? WHERE id=?", (batch["snapshot"], batch["id"]))
             batch.update(lease=token, status="processing", attempts=batch["attempts"] + 1)
@@ -286,6 +333,7 @@ class Store:
                     "messages": c.execute("SELECT COUNT(*) FROM messages").fetchone()[0],
                     "buffered": c.execute("SELECT COUNT(*) FROM messages WHERE batch_id IS NULL").fetchone()[0],
                     "batches": dict(c.execute("SELECT status,COUNT(*) FROM batches GROUP BY status").fetchall()),
+                    "outcomes": dict(c.execute("SELECT outcome,COUNT(*) FROM batches WHERE outcome IS NOT NULL GROUP BY outcome").fetchall()),
                     "usage": dict(c.execute("SELECT COUNT(*) calls,COALESCE(SUM(input_tokens),0) input_tokens,"
                                             "COALESCE(SUM(output_tokens),0) output_tokens,"
                                             "COALESCE(SUM(CASE WHEN input_tokens IS NULL THEN 1 ELSE 0 END),0) calls_without_usage FROM calls").fetchone()),

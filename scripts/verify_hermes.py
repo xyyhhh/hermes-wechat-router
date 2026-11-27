@@ -185,6 +185,8 @@ async def exercise(home, wrapper, decision_mode, provider):
         "port": port, "mode": "active", "owner_ids": ["fixture-owner"],
         "quiet_seconds": .1, "max_wait_seconds": .2, "poll_seconds": .01, "hermes_bin": str(wrapper),
         "decision_mode": decision_mode, "decision_question": "集成测试批次事件问题",
+        "sender_rules": [{"source": "fixture-listener", "sender_id": "fixture-colleague", "importance": "high"},
+                         {"source": "fixture-listener", "sender_id": "fixture-bot", "role": "assistant"}],
     })
     async with TestServer(app) as server, ClientSession(trust_env=False) as session:
         config.extra.update(provider=provider, model="gemini-decision-1" if provider == "google" else "jev-latest",
@@ -246,9 +248,30 @@ async def exercise(home, wrapper, decision_mode, provider):
                 board = KanbanClient(adapter.settings, home)
                 task = await board.show(outcome["tasks"][0]["task_id"])
                 assert task["task"]["assignee"] == "assistant"
+                assert task["task"]["priority"] == 10
                 assert task["task"]["status"] == "ready"
                 assert "fixture-group" in task["task"]["body"]
                 print(f"HTTP ingress -> {provider} one {decision_mode} question -> main assistant via real Hermes Kanban: passed")
+                receipt = {"source": "fixture-listener", "event_id": "receipt", "conversation_id": "fixture-group",
+                           "chat_type": "group", "sender_id": "fixture-bot", "text": "已设置周五三点的安排。",
+                           "occurred_at": "2026-11-04T16:01:00+08:00", "reply_to": "0"}
+                body = json.dumps(receipt, ensure_ascii=False).encode()
+                stamp = str(int(time.time()))
+                headers = {"Content-Type": "application/json", "X-Wechat-Router-Timestamp": stamp,
+                           "X-Wechat-Router-Signature": signature(os.environ["WECHAT_ROUTER_SECRET"], stamp,
+                                                                    "POST", PREFIX + "/events", body)}
+                async with session.post(base + PREFIX + "/events", data=body, headers=headers) as result:
+                    assert result.status == 202
+                for _ in range(200):
+                    receipt_status = inbox.event_status("fixture-listener", "receipt")
+                    if receipt_status["status"] in ("done", "failed"):
+                        break
+                    await asyncio.sleep(.05)
+                assert receipt_status["outcome"] == "assistant_receipt", receipt_status
+                assert len(requests) == 1
+                updated = await board.show(outcome["tasks"][0]["task_id"])
+                assert any("wechat-router:receipt:" in comment["body"] for comment in updated["comments"])
+                print("Sender priority and verified assistant receipt through actual Hermes CLI: passed")
             finally:
                 await adapter.disconnect()
             assert adapter._worker is None and adapter._runner is None and adapter._session is None

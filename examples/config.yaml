@@ -11,7 +11,9 @@ platforms:
       port: 8768
       receive_only: true # only receive until a key is configured and processing is explicitly resumed
       mode: observe # observe calls the selected decision model, but creates no Kanban tasks; change to active when ready
-      owner_name: 我
+      owner_name: 你的姓名
+      owner_aliases: [你的群昵称]
+      sender_rules: [] # configure source/sender_id, optional conversation_id, name, aliases, importance, role in Dashboard
       owner_ids: [YOUR_WECHAT_ID]
       sources: [wechat-listener]
       timezone: Asia/Shanghai
@@ -21,11 +23,11 @@ platforms:
       provider: typesafe # google -> Gemini Decisions; custom -> System One compatible service
       provider_base_url: "" # e.g. https://provider.example/v1; uses WECHAT_ROUTER_API_KEY
       # jev_instructions: | # optional; omit to use the built-in policy
-      #   Focus on appointments, deadlines and important events relevant to the owner.
+      #   Detect time-plan signals and updates, including unconfirmed invitations.
       board: default
       assistant_profile: assistant
       decision_mode: bool # bool -> native Noul; choice -> ignore/watch/act
       bool_threshold: 0.6
-      # decision_question: Does this batch contain an event the main assistant should follow up?
-      # positive_criteria: Relevant appointments, deadlines, commitments or important updates.
-      # negative_criteria: Chitchat or unrelated/duplicate messages with no follow-up needed.
+      # decision_question: Does this batch contain a time-plan signal or update?
+      # positive_criteria: Appointments, invitations, plans, deadlines and their updates.
+      # negative_criteria: No time-plan signal in current messages; history alone must not trigger.

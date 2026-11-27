@@ -1,0 +1,18 @@
+[
+  {"id":"self_invitation","expected":true,"messages":["今晚要不要一起吃饭？","我可能晚一点到。"],"self":true},
+  {"id":"date_not_decided","expected":true,"messages":["改天一起吃个饭吧。"]},
+  {"id":"deadline","expected":true,"messages":["请大家周五之前提交申请表。"]},
+  {"id":"other_people","expected":true,"messages":["小王和小陈约好下周二下午去办证。"]},
+  {"id":"confirm","expected":true,"history":["周三下午两点开会，能来吗？"],"messages":["可以"]},
+  {"id":"reschedule","expected":true,"history":["约好周三下午开会。"],"messages":["改到周四吧。"]},
+  {"id":"cancel","expected":true,"history":["明晚一起吃饭。"],"messages":["我去不了了。"]},
+  {"id":"weather","expected":false,"messages":["明天降温了，多穿点。"]},
+  {"id":"finished_past","expected":false,"messages":["昨天已经聚过餐了，当时挺开心的。"]},
+  {"id":"history_only","expected":false,"history":["周六上午十点开会。"],"messages":["这个表情包真好笑哈哈哈哈。"]},
+  {"id":"mixed_topics","expected":true,"messages":["这视频好搞笑。","今晚要不要一起吃饭？","但是我今天会晚一点。"]},
+  {"id":"unknown_reply","expected":false,"messages":["好的"]},
+  {"id":"recurring","expected":true,"messages":["以后每个月第一个周一下午例会。"]},
+  {"id":"relative_plan","expected":true,"messages":["等会去取一下快递，晚点再过来找你。"]},
+  {"id":"quote_outside_history","expected":true,"quotes":["下周三下午两点见，可以吗？"],"reply_to_quote":true,"messages":["好呀"]},
+  {"id":"chitchat_after_plan","expected":false,"history":["周四交材料。","记得准备好。"],"messages":["这个梗我昨天也看到过。"]}
+]

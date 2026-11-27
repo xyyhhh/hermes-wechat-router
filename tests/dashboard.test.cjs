@@ -96,11 +96,25 @@ test("Dashboard renders, saves scoped config and secrets, pauses, and retries", 
     await click("重试");
     assert.equal(failure, false);
     await input("owner_name", "本人改名");
+    await input("owner_aliases", "群昵称一\n群昵称二");
+    await click("添加发信人规则");
+    await input("sender-0-source", "listener");
+    await input("sender-0-sender_id", "stable-person-id");
+    await input("sender-0-aliases", "实验室昵称, 朋友昵称");
+    await React.act(async () => {
+      const select = document.querySelector('[name="sender-0-importance"]');
+      select.value = "high";
+      select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
     await React.act(async () => {
       document.querySelector("form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
     });
     const saved = requests.find(x => x.url.includes("/config?") && x.options.method === "PUT");
     assert.equal(saved.body.settings.owner_name, "本人改名");
+    assert.deepEqual(saved.body.settings.owner_aliases, ["群昵称一", "群昵称二"]);
+    assert.equal(saved.body.settings.sender_rules[0].importance, "high");
+    assert.equal(saved.body.settings.sender_rules[0].sender_id, "stable-person-id");
+    assert.deepEqual(saved.body.settings.sender_rules[0].aliases, ["实验室昵称", "朋友昵称"]);
     assert.equal(saved.body.settings.receive_only, true);
     assert.equal(saved.body.settings.provider_base_url, "https://provider.example/v1");
     assert.equal(saved.body.settings.jev_instructions, "只关注本人已确认的预约");

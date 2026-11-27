@@ -73,7 +73,7 @@ class KanbanClient:
     async def create(self, effect, body, key, parent=None):
         await self.check_profile(effect["profile"])
         args = ["create", effect["title"], "--body", body, "--assignee", effect["profile"],
-                "--idempotency-key", key, "--created-by", "wechat-router", "--json"]
+                "--idempotency-key", key, "--created-by", "wechat-router", "--priority", str(effect.get("priority", 0)), "--json"]
         if parent:
             args += ["--parent", parent]
         value = await self._run(*args, json_output=True)

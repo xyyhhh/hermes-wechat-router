@@ -29,7 +29,8 @@ def test_google_preview_and_synthetic_connection_test(ui, monkeypatch):
     async def evaluate(self, request):
         assert self.provider == "google" and self.endpoint.endswith("/v1beta/decisions")
         assert self.request_options == {}
-        assert "synthetic-owner" in request["input"]
+        assert "测试本人" in request["input"]
+        assert "synthetic-owner" not in request["input"]
         assert "private-owner-id" not in request["input"] and "private-personal-policy" not in request["input"]
         return {"answers": {"needs_followup": {"type": "noul", "noul": .99}},
                 "usage": {"input_tokens": 100, "output_tokens": 0}}

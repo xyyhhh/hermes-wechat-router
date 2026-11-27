@@ -19,7 +19,7 @@ from .audit import AuditLog, audit_path, audit_context
 
 router = APIRouter()
 EDITABLE = frozenset({
-    "host", "port", "mode", "receive_only", "owner_name", "owner_ids", "interests", "sources", "timezone",
+    "host", "port", "mode", "receive_only", "owner_name", "owner_ids", "owner_aliases", "sender_rules", "interests", "sources", "timezone",
     "quiet_seconds", "max_wait_seconds", "max_batch_messages", "max_context_chars",
     "min_confidence", "model", "board", "assistant_profile",
     "provider", "provider_base_url", "jev_instructions", "request_timeout",
@@ -111,8 +111,11 @@ async def test_connection(body: dict[str, Any] = Body(...)):
         raise HTTPException(409, "请先保存所选 provider 的模型密钥。")
     snapshot = asdict(settings)
     # No owner IDs, policy, interests or real messages from the user's config leave this endpoint.
-    snapshot.update(owner_name="测试本人", owner_ids=["synthetic-owner"], interests=[], context=[], candidates=[],
-                    jev_instructions="只判断合成消息中是否有明确要求测试本人参与的预约。",
+    snapshot.update(input_format=2, owner_name="测试本人", owner_ids=["synthetic-owner"], owner_aliases=[],
+                    sender_rules=[], interests=[], context=[], candidates=[], reply_context=[],
+                    jev_instructions="只判断合成消息中是否出现时间安排。",
+                    decision_question=Settings().decision_question, positive_criteria=Settings().positive_criteria,
+                    negative_criteria=Settings().negative_criteria, choice_criteria=Settings().choice_criteria,
                     messages=[{"text": "@测试本人 已确认：2030年1月2日下午三点参加项目评审会。",
                                "sender_id": "synthetic-colleague", "mentions": ["synthetic-owner"],
                                "occurred_at": "2030-01-01T10:00:00+08:00", "chat_type": "group"}])
